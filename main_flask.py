@@ -11,7 +11,23 @@ from flask import Flask, request, jsonify
 from pyrogram import Client
 import re
 
-app = Flask(__name__)
+import os
+import base64
+
+# Get the base64-encoded session from Heroku Config Vars
+encoded_session = os.environ.get("TELEGRAM_SESSION")
+
+if encoded_session:
+    # Decode the base64 string
+    session_data = base64.b64decode(encoded_session)
+
+    # Save it as the userbot_session.session file
+    with open('userbot_session.session', 'wb') as session_file:
+        session_file.write(session_data)
+
+    print("Session file has been decoded and saved successfully.")
+else:
+    print("No session data found in environment variables.")
 
 
 # Define your parsing function
