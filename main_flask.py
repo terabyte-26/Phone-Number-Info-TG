@@ -13,6 +13,7 @@ import re
 
 app = Flask(__name__)
 
+
 # Define your parsing function
 def parse_bot_reply(text: str) -> dict:
     lines = [l.strip() for l in text.splitlines() if l.strip()]
@@ -67,7 +68,20 @@ def parse_bot_reply(text: str) -> dict:
 
     return result
 
-# Flask route to handle POST requests
+
+# Simple Home Route
+@app.route('/')
+def home():
+    app_info = {
+        "app_name": "Phone Search Bot",
+        "description": "This app retrieves phone number information via a bot.",
+        "version": "1.0",
+        "status": "Running",
+    }
+    return jsonify(app_info)
+
+
+# Flask route to handle GET requests
 @app.route('/search_phone', methods=['GET'])
 def search_phone():
 
