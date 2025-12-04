@@ -29,6 +29,7 @@ if encoded_session:
 else:
     print("No session data found in environment variables.")
 
+app = Flask(__name__)
 
 # Define your parsing function
 def parse_bot_reply(text: str) -> dict:
