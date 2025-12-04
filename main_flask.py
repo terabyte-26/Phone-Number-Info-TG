@@ -14,6 +14,11 @@ import re
 import os
 import base64
 
+from dotenv import load_dotenv
+
+# Load environment variables from the .env file
+load_dotenv()
+
 # Get the base64-encoded session from Heroku Config Vars
 encoded_session = os.environ.get("TELEGRAM_SESSION")
 
