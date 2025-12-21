@@ -11,3 +11,7 @@ __pycache__/
 .venv/
 venv/
 env/
+
+# Telegram Session files
+*.session
+*.session-journal
