@@ -107,10 +107,21 @@ ENCRYPT_BOTS: dict[str: str]= {
     'AML': 'ASocialMediaLeaksBot ', # Monthly fee (paid)
 }
 
+IS_BOT_RUNNING: bool = False
+
 
 # Flask route to handle GET requests
 @app.route('/search_phone', methods=['GET'])
-def search_phone():
+async def search_phone():
+
+    global IS_BOT_RUNNING
+
+    # 2. Check if bot is busy before doing anything
+    if IS_BOT_RUNNING:
+        return jsonify({
+            "status": "busy",
+            "message": "The bot is currently processing another request. Please try again in a few seconds."
+        }), 503
 
     message_text: str | None = request.args.get("input", "")
     source: str | None = request.args.get("source", "")
@@ -129,102 +140,135 @@ def search_phone():
     timeout_seconds: int = 40
 
     # Asyncio event loop for pyrogram client
-    async def main():
 
-        app: Client = Client(
+    # async with tg_bot:
+    try:
+
+        # 3. Lock the bot
+        IS_BOT_RUNNING = True
+
+        tg_bot = Client(
             "my_session",
             api_id=TelegramConfig.API_ID,
             api_hash=TelegramConfig.API_HASH,
             phone_number=TelegramConfig.PHONE_NUMBER,
         )
 
-        async with app:
-            sent = await app.send_message(
-                bot_username,
-                message_text
-            )
+        # Ensure client is connected (using the global instance)
+        if not tg_bot.is_connected:
+            print("Starting Telegram client...")
+            await tg_bot.start()
 
-            # await app.answer_inline_query()
-            print(f"Sent to @{source}: {message_text}")
+        sent = await tg_bot.send_message(bot_username, message_text)
 
-            deadline = time.time() + timeout_seconds
-            print(f"Waiting for reply (timeout = {timeout_seconds}s)...")
+        timeout_seconds = 40
+        deadline = asyncio.get_event_loop().time() + timeout_seconds
+        found_reply = None
 
-            while time.time() < deadline:
-                found_reply = None
-                async for msg in app.get_chat_history(bot_username, limit=10):
-                    if msg.id <= sent.id:
-                        continue
+        # await app.answer_inline_query()
+        print(f"Sent to @{source}: {message_text}")
 
-                    if not msg.from_user or not msg.from_user.is_bot:
-                        continue
+        # deadline = time.time() + timeout_seconds
+        print(f"Waiting for reply (timeout = {timeout_seconds}s)...")
 
-                    if msg.from_user.username and msg.from_user.username.lower() != bot_username.lower():
-                        continue
+        # while time.time() < deadline:
+        while asyncio.get_event_loop().time() < deadline:
+            async for msg in tg_bot.get_chat_history(bot_username, limit=10):
+                if msg.id <= sent.id:
+                    continue
 
-                    if 'the number of leaks' in msg.text.lower() and 'number of results' in msg.text.lower():
-                        continue
+                if not msg.from_user or not msg.from_user.is_bot:
+                    continue
 
-                    found_reply = msg
+                if msg.from_user.username and msg.from_user.username.lower() != bot_username.lower():
+                    continue
+
+                if 'the number of leaks' in msg.text.lower() and 'number of results' in msg.text.lower():
+                    continue
+
+                if 'too frequent requests' in msg.text.lower():
+
+                    await tg_bot.stop()
+                    return jsonify({"error": "Too many requests sent to the bot. Please try again later."}), 429
+
+                found_reply = msg
+                break
+            if found_reply: break
+            await asyncio.sleep(1)
+
+
+        if found_reply:
+            # 1. IMMEDIATE CHECK FOR "NOT FOUND"
+            if "no results found" in found_reply.text.lower():
+                return jsonify({"phone_not_found": True, "message": "No results found."})
+
+            all_extracted_records = []
+
+            # 2. CALCULATE TOTAL PAGES
+            total_pages = 1  # Default if only one row exists
+
+            # Check if there are multiple rows of buttons (indicating multiple pages)
+            print("buttons rows count", len(found_reply.reply_markup.inline_keyboard))
+            if found_reply.reply_markup and len(found_reply.reply_markup.inline_keyboard) >= 2:
+                try:
+                    # Get text from Row 1 (index 0), Button 2 (index 1) -> e.g., "1/9"
+                    page_text = found_reply.reply_markup.inline_keyboard[0][1].text
+                    print("page_text", page_text)
+                    # Split by "/" and get the second number
+                    reported_total = int(page_text.split('\\')[-1])
+                    print("reported_total", reported_total)
+
+                    total_pages = min(reported_total, 5)
+                except (IndexError, ValueError):
+                    total_pages = 1
+
+                print(f"Total pages detected: {total_pages}")
+
+            # 3. NAVIGATION LOOP
+            for current_page_idx in range(total_pages):
+                print(f"Processing page {current_page_idx + 1}...")
+
+                try:
+                    # Use retry_extractor to get clean JSON from Groq
+                    page_data = retry_extractor(get_groq_raw_response, found_reply.text, attempts=4)
+
+                    if isinstance(page_data, list):
+                        all_extracted_records.extend(page_data)
+                    elif isinstance(page_data, dict):
+                        all_extracted_records.append(page_data)
+
+                    # Navigate to the next page if we aren't at the end
+                    if current_page_idx < total_pages - 1:
+                        # Click the 'Next' button (Row 3, Col 1 based on your click(2, 0) logic)
+                        await found_reply.click(2, 0)
+                        await asyncio.sleep(1)  # Wait for bot to edit message
+
+                        # Refresh message to get new text for next loop iteration
+                        found_reply = await tg_bot.get_messages(chat_id=bot_username, message_ids=found_reply.id)
+
+                except Exception as e:
+                    print(f"Error processing page {current_page_idx + 1}: {e}")
                     break
 
-                if found_reply:
-                    # 1. IMMEDIATE CHECK FOR "NOT FOUND"
-                    if "no results found" in found_reply.text.lower():
-                        return jsonify({"phone_not_found": True, "message": "No results found."})
+            await tg_bot.stop()
+            return jsonify(all_extracted_records)
 
-                    all_extracted_records = []
+        else:
+            await tg_bot.stop()
+            return jsonify({"error": "No reply received from bot within timeout period."}), 504
 
-                    # 2. CALCULATE TOTAL PAGES
-                    total_pages = 1  # Default if only one row exists
+    except Exception as e:
 
-                    # Check if there are multiple rows of buttons (indicating multiple pages)
-                    print("buttons rows count", len(found_reply.reply_markup.inline_keyboard))
-                    if found_reply.reply_markup and len(found_reply.reply_markup.inline_keyboard) >= 2:
-                        try:
-                            # Get text from Row 1 (index 0), Button 2 (index 1) -> e.g., "1/9"
-                            page_text = found_reply.reply_markup.inline_keyboard[0][1].text
-                            print("page_text", page_text)
-                            # Split by "/" and get the second number
-                            reported_total = int(page_text.split('\\')[-1])
-                            print("reported_total", reported_total)
+        try:
+            await tg_bot.stop()
+        except:
+            pass
 
-                            total_pages = min(reported_total, 5)
-                        except (IndexError, ValueError):
-                            total_pages = 1
+        return jsonify({"error": str(e)}), 500
 
-                        print(f"Total pages detected: {total_pages}")
-
-                    # 3. NAVIGATION LOOP
-                    for current_page_idx in range(total_pages):
-                        print(f"Processing page {current_page_idx + 1}...")
-
-                        try:
-                            # Use retry_extractor to get clean JSON from Groq
-                            page_data = retry_extractor(get_groq_raw_response, found_reply.text, attempts=4)
-
-                            if isinstance(page_data, list):
-                                all_extracted_records.extend(page_data)
-                            elif isinstance(page_data, dict):
-                                all_extracted_records.append(page_data)
-
-                            # Navigate to the next page if we aren't at the end
-                            if current_page_idx < total_pages - 1:
-                                # Click the 'Next' button (Row 3, Col 1 based on your click(2, 0) logic)
-                                await found_reply.click(2, 0)
-                                await asyncio.sleep(1)  # Wait for bot to edit message
-
-                                # Refresh message to get new text for next loop iteration
-                                found_reply = await app.get_messages(chat_id=bot_username, message_ids=found_reply.id)
-
-                        except Exception as e:
-                            print(f"Error processing page {current_page_idx + 1}: {e}")
-                            break
-
-                    return jsonify(all_extracted_records)
-
-    return asyncio.run(main())
-
+    finally:
+        print("Releasing bot lock...")
+        IS_BOT_RUNNING = False
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5000)
