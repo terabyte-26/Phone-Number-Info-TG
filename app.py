@@ -195,7 +195,7 @@ async def search_phone():
                 break
             if found_reply: break
             await asyncio.sleep(1)
-
+        
 
         if found_reply:
             # 1. IMMEDIATE CHECK FOR "NOT FOUND"
@@ -270,5 +270,57 @@ async def search_phone():
         print("Releasing bot lock...")
         IS_BOT_RUNNING = False
 
+
+@app.route('/fix', methods=['GET'])
+async def fix_bot():
+    """
+    Forcefully resets the bot status and attempts to disconnect any
+    hanging Pyrogram sessions to clear SQLite locks.
+    """
+    global IS_BOT_RUNNING
+    results = []
+
+    try:
+        # 1. Reset the Global Lock
+        if IS_BOT_RUNNING:
+            IS_BOT_RUNNING = False
+            results.append("Global lock 'IS_BOT_RUNNING' has been reset to False.")
+        else:
+            results.append("Global lock was already False.")
+
+        # 2. Force Stop Pyrogram Client
+        # We initialize a temporary client instance to target the same session file
+        temp_bot = Client(
+            "my_session",
+            api_id=TelegramConfig.API_ID,
+            api_hash=TelegramConfig.API_HASH,
+        )
+
+        if temp_bot.is_connected:
+            await temp_bot.stop()
+            results.append("Active Pyrogram session forcefully stopped.")
+        else:
+            # Sometimes is_connected is False but the .session file is still locked.
+            # Attempting a stop() anyway can help clear internal asyncio tasks.
+            try:
+                await temp_bot.stop()
+                results.append("Pyrogram cleanup signal sent.")
+            except:
+                results.append("No active session detected to stop.")
+
+        return jsonify({
+            "status": "success",
+            "actions_taken": results,
+            "message": "System reset successfully. You can try /search_phone again."
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "status": "partial_error",
+            "error": str(e),
+            "message": "Manual intervention may be required if the .session file is still locked."
+        }), 500
+
+
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    app.run(debug=True, host="0.0.0.0", port=8080)
