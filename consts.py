@@ -14,6 +14,7 @@ class TelegramConfig(object):
     API_ID: int = int(os.getenv("API_ID"))
     API_HASH: str = os.getenv("API_HASH")
     PHONE_NUMBER: str = os.getenv("PHONE_NUMBER")
+    SESSIONS: list[str] = os.getenv("SESSION_STRINGS", "").split(",")
 
 
 class API_KEYS(object):

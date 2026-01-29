@@ -4,18 +4,96 @@
 # Telegram: @hamza_farahat or https://t.me/hamza_farahat
 # WhatsApp: +212772177012
 
+import os
 import re
-
-import time
 import json
 import asyncio
+import datetime
 
 from pyrogram import Client
+from pyrogram.storage import MemoryStorage
 from flask import Flask, request, jsonify
 
 from ai_helpers import get_groq_raw_response
 from consts import TelegramConfig
 from plugins import retry_extractor
+from session_manager import generate_missing_sessions
+
+import logging
+from logging.handlers import RotatingFileHandler
+
+# --- ROBUST LOGGING CONFIGURATION ---
+log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+log_file = 'app.log'
+
+# Explicitly set encoding='utf-8' to handle emojis and special characters
+file_handler = RotatingFileHandler(
+    log_file,
+    maxBytes=5*1024*1024,
+    backupCount=5,
+    encoding='utf-8'
+)
+file_handler.setFormatter(log_formatter)
+file_handler.setLevel(logging.INFO)
+
+# For the console handler, we use a 'replace' error handler
+# so it doesn't crash if the terminal doesn't support an emoji
+import sys
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setFormatter(log_formatter)
+console_handler.setLevel(logging.INFO)
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+logger.addHandler(file_handler)
+logger.addHandler(console_handler)
+
+
+def startup_check():
+    # Only run if SESSION_STRINGS is empty or missing in .env
+    if not os.getenv("SESSION_STRINGS"):
+        logger.info("No sessions found. Starting automatic setup...")
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(generate_missing_sessions())
+    else:
+        logger.info("✅ Sessions loaded from environment.")
+
+
+
+
+STATE_FILE = "bot_state.json"
+
+
+def get_bot_state():
+    try:
+        with open(STATE_FILE, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {"active_index": 0, "last_switch_time": None, "switch_history": []}
+
+
+def switch_bot():
+
+    state = get_bot_state()
+    old_index = state["active_index"]
+    # Toggle between 0 and 1 (assuming 2 bots)
+    new_index = 1 if old_index == 0 else 0
+
+    now = datetime.datetime.now().isoformat()
+    state["active_index"] = new_index
+    state["last_switch_time"] = now
+    state["switch_history"].append({
+        "from_bot": old_index,
+        "to_bot": new_index,
+        "timestamp": now
+    })
+
+    with open(STATE_FILE, "w") as f:
+        json.dump(state, f, indent=4)
+
+    logger.warning(f"🔄 SWITCH TRIGGERED: Bot {old_index} -> Bot {new_index}")
+    return new_index
+
 
 app = Flask(__name__)
 
@@ -111,125 +189,125 @@ IS_BOT_RUNNING: bool = False
 
 
 # Flask route to handle GET requests
+# app.py
+
 @app.route('/search_phone', methods=['GET'])
 async def search_phone():
-
     global IS_BOT_RUNNING
 
-    # 2. Check if bot is busy before doing anything
+    # 1. Check if bot is busy
     if IS_BOT_RUNNING:
         return jsonify({
             "status": "busy",
             "message": "The bot is currently processing another request. Please try again in a few seconds."
         }), 503
 
-    message_text: str | None = request.args.get("input", "")
-    source: str | None = request.args.get("source", "")
+    state = get_bot_state()
+    current_session = TelegramConfig.SESSIONS[state["active_index"]]
+
+    # 2. Validate Inputs
+    message_text = request.args.get("input", "")
+    source = request.args.get("source", "")
 
     if not message_text:
         return jsonify({"error": "Phone number is required"}), 400
-
     if not source:
         return jsonify({"error": "Bot username is required"}), 400
 
-    bot_username: str | None = ENCRYPT_BOTS.get(source.upper())
-
+    bot_username = ENCRYPT_BOTS.get(source.upper())
     if not bot_username:
         return jsonify({"error": "Invalid bot source provided."}), 400
 
-    timeout_seconds: int = 40
+    # 3. Initialize Bot
+    tg_bot = None
 
-    # Asyncio event loop for pyrogram client
-
-    # async with tg_bot:
     try:
-
-        # 3. Lock the bot
         IS_BOT_RUNNING = True
 
+        # Initialize Client with Memory Storage (Fixes "Database Locked")
         tg_bot = Client(
-            "my_session",
+            name=f"bot_instance_{state['active_index']}",
             api_id=TelegramConfig.API_ID,
             api_hash=TelegramConfig.API_HASH,
-            phone_number=TelegramConfig.PHONE_NUMBER,
+            session_string=current_session,
+            in_memory=True,
+            no_updates=True,
         )
 
-        # Ensure client is connected (using the global instance)
-        if not tg_bot.is_connected:
-            print("Starting Telegram client...")
-            await tg_bot.start()
+        await tg_bot.start()
+        logger.info(f"🚀 Starting search: {message_text} via @{bot_username}")
 
+        # 4. Send Message
         sent = await tg_bot.send_message(bot_username, message_text)
 
+        # 5. Wait for Reply (Polling Loop)
         timeout_seconds = 40
         deadline = asyncio.get_event_loop().time() + timeout_seconds
         found_reply = None
 
-        # await app.answer_inline_query()
-        print(f"Sent to @{source}: {message_text}")
-
-        # deadline = time.time() + timeout_seconds
-        print(f"Waiting for reply (timeout = {timeout_seconds}s)...")
-
-        # while time.time() < deadline:
         while asyncio.get_event_loop().time() < deadline:
+            # Check last 10 messages for a new reply
             async for msg in tg_bot.get_chat_history(bot_username, limit=10):
-                if msg.id <= sent.id:
-                    continue
+                # Ignore old messages (older than our sent message)
 
+
+                if msg.id <= sent.id: continue
+
+                text = msg.text.lower() if msg.text else ""
+
+                if "too many requests" in text or "tokens recover" in text or 'too frequent requests' in text:
+                    logger.error(f"❌ Rate limit hit on account index {state['active_index']}")
+                    switch_bot()
+                    return jsonify({
+                        "status": "switched",
+                        "message": "Primary bot limit reached. Switching to secondary. Please retry your request."
+                    }), 429
+
+                # Validation: Must be from the bot we messaged
                 if not msg.from_user or not msg.from_user.is_bot:
                     continue
-
                 if msg.from_user.username and msg.from_user.username.lower() != bot_username.lower():
                     continue
 
-                if 'the number of leaks' in msg.text.lower() and 'number of results' in msg.text.lower():
+                # Ignore "Processing" status messages
+                if 'the number of leaks' in text and 'number of results' in text:
                     continue
 
-                if 'too frequent requests' in msg.text.lower():
-
-                    await tg_bot.stop()
+                # Handle Rate Limits
+                if 'too frequent requests' in text:
                     return jsonify({"error": "Too many requests sent to the bot. Please try again later."}), 429
 
                 found_reply = msg
                 break
-            if found_reply: break
-            await asyncio.sleep(1)
-        
 
+            if found_reply:
+                break
+
+            await asyncio.sleep(1)
+
+        # 6. Process the Reply
         if found_reply:
-            # 1. IMMEDIATE CHECK FOR "NOT FOUND"
             if "no results found" in found_reply.text.lower():
                 return jsonify({"phone_not_found": True, "message": "No results found."})
 
             all_extracted_records = []
 
-            # 2. CALCULATE TOTAL PAGES
-            total_pages = 1  # Default if only one row exists
-
-            # Check if there are multiple rows of buttons (indicating multiple pages)
-            print("buttons rows count", len(found_reply.reply_markup.inline_keyboard))
+            # Calculate Pages (Multi-page logic)
+            total_pages = 1
             if found_reply.reply_markup and len(found_reply.reply_markup.inline_keyboard) >= 2:
                 try:
-                    # Get text from Row 1 (index 0), Button 2 (index 1) -> e.g., "1/9"
                     page_text = found_reply.reply_markup.inline_keyboard[0][1].text
-                    print("page_text", page_text)
-                    # Split by "/" and get the second number
-                    reported_total = int(page_text.split('\\')[-1])
-                    print("reported_total", reported_total)
-
-                    total_pages = min(reported_total, 5)
+                    reported_total = int(page_text.split('\\')[-1])  # Handles "1\9" format
+                    total_pages = min(reported_total, 5)  # Cap at 5 pages
                 except (IndexError, ValueError):
                     total_pages = 1
 
-                print(f"Total pages detected: {total_pages}")
-
-            # 3. NAVIGATION LOOP
+            # Extraction Loop
             for current_page_idx in range(total_pages):
-                print(f"Processing page {current_page_idx + 1}...")
+                logger.info(f"Processing page {current_page_idx + 1}/{total_pages} for {message_text}")
 
                 try:
-                    # Use retry_extractor to get clean JSON from Groq
+                    # Extract Data using Groq/Regex
                     page_data = retry_extractor(get_groq_raw_response, found_reply.text, attempts=4)
 
                     if isinstance(page_data, list):
@@ -237,90 +315,50 @@ async def search_phone():
                     elif isinstance(page_data, dict):
                         all_extracted_records.append(page_data)
 
-                    # Navigate to the next page if we aren't at the end
+                    # Navigate to Next Page
                     if current_page_idx < total_pages - 1:
-                        # Click the 'Next' button (Row 3, Col 1 based on your click(2, 0) logic)
-                        await found_reply.click(2, 0)
-                        await asyncio.sleep(1)  # Wait for bot to edit message
+                        await found_reply.click(2, 0)  # Click "Next"
+                        await asyncio.sleep(1.5)  # Wait for edit
 
-                        # Refresh message to get new text for next loop iteration
+                        # Refresh message object
                         found_reply = await tg_bot.get_messages(chat_id=bot_username, message_ids=found_reply.id)
 
                 except Exception as e:
-                    print(f"Error processing page {current_page_idx + 1}: {e}")
+                    logger.exception(f"Error processing page {current_page_idx + 1}")
                     break
 
-            await tg_bot.stop()
             return jsonify(all_extracted_records)
 
         else:
-            await tg_bot.stop()
             return jsonify({"error": "No reply received from bot within timeout period."}), 504
 
     except Exception as e:
-
-        try:
-            await tg_bot.stop()
-        except:
-            pass
-
+        logger.exception("🔥 Critical error in search_phone route")
         return jsonify({"error": str(e)}), 500
 
     finally:
-        print("Releasing bot lock...")
+        # 7. Safe Cleanup
+        if tg_bot and tg_bot.is_connected:
+            await tg_bot.stop()
+
+        logger.info("Releasing bot lock...")
         IS_BOT_RUNNING = False
 
 
 @app.route('/fix', methods=['GET'])
-async def fix_bot():
+def fix_bot():
     """
-    Forcefully resets the bot status and attempts to disconnect any
-    hanging Pyrogram sessions to clear SQLite locks.
+    Resets the internal busy lock.
+    (No need to stop Pyrogram here as the main route handles cleanup safely now).
     """
     global IS_BOT_RUNNING
-    results = []
-
-    try:
-        # 1. Reset the Global Lock
-        if IS_BOT_RUNNING:
-            IS_BOT_RUNNING = False
-            results.append("Global lock 'IS_BOT_RUNNING' has been reset to False.")
-        else:
-            results.append("Global lock was already False.")
-
-        # 2. Force Stop Pyrogram Client
-        # We initialize a temporary client instance to target the same session file
-        temp_bot = Client(
-            "my_session",
-            api_id=TelegramConfig.API_ID,
-            api_hash=TelegramConfig.API_HASH,
-        )
-
-        if temp_bot.is_connected:
-            await temp_bot.stop()
-            results.append("Active Pyrogram session forcefully stopped.")
-        else:
-            # Sometimes is_connected is False but the .session file is still locked.
-            # Attempting a stop() anyway can help clear internal asyncio tasks.
-            try:
-                await temp_bot.stop()
-                results.append("Pyrogram cleanup signal sent.")
-            except:
-                results.append("No active session detected to stop.")
-
-        return jsonify({
-            "status": "success",
-            "actions_taken": results,
-            "message": "System reset successfully. You can try /search_phone again."
-        }), 200
-
-    except Exception as e:
-        return jsonify({
-            "status": "partial_error",
-            "error": str(e),
-            "message": "Manual intervention may be required if the .session file is still locked."
-        }), 500
+    IS_BOT_RUNNING = False
+    return jsonify({
+        "status": "success",
+        "message": "Bot lock has been forcibly released."
+    })
 
 
 if __name__ == "__main__":
+    startup_check()
     app.run(debug=True, host="0.0.0.0", port=8080)
