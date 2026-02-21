@@ -1,5 +1,41 @@
 {
-  "active_index": 0,
-  "last_switch_time": "2026-01-29T13:21:11",
-  "switch_history": []
+    "active_index": 0,
+    "last_switch_time": "2026-02-21T17:45:13.284394",
+    "switch_history": [
+        {
+            "from_bot": 0,
+            "to_bot": 1,
+            "timestamp": "2026-02-21T17:42:29.047097"
+        },
+        {
+            "from_bot": 1,
+            "to_bot": 0,
+            "timestamp": "2026-02-21T17:42:35.466294"
+        },
+        {
+            "from_bot": 0,
+            "to_bot": 1,
+            "timestamp": "2026-02-21T17:42:37.307121"
+        },
+        {
+            "from_bot": 1,
+            "to_bot": 0,
+            "timestamp": "2026-02-21T17:42:42.241074"
+        },
+        {
+            "from_bot": 0,
+            "to_bot": 1,
+            "timestamp": "2026-02-21T17:45:04.794206"
+        },
+        {
+            "from_bot": 1,
+            "to_bot": 2,
+            "timestamp": "2026-02-21T17:45:11.957937"
+        },
+        {
+            "from_bot": 2,
+            "to_bot": 0,
+            "timestamp": "2026-02-21T17:45:13.284394"
+        }
+    ]
 }

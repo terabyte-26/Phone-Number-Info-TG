@@ -72,16 +72,29 @@ def get_bot_state():
         return {"active_index": 0, "last_switch_time": None, "switch_history": []}
 
 
-def switch_bot():
-
+def switch_bot(target_index=None):
     state = get_bot_state()
-    old_index = state["active_index"]
-    # Toggle between 0 and 1 (assuming 2 bots)
-    new_index = 1 if old_index == 0 else 0
+    # Safely default to 0 if active_index isn't found
+    old_index = state.get("active_index", 0)
+
+    # Dynamically determine the total number of Pyrogram sessions available
+    from consts import TelegramConfig
+    total_sessions = len(TelegramConfig.SESSIONS)
+
+    if target_index is not None:
+        new_index = int(target_index)
+    else:
+        # Cycle through all available indexes: 0 -> 1 -> 2 -> 0 -> 1 ...
+        new_index = (old_index + 1) % total_sessions
 
     now = datetime.datetime.now().isoformat()
     state["active_index"] = new_index
     state["last_switch_time"] = now
+
+    # Ensure switch_history key exists to prevent KeyError
+    if "switch_history" not in state:
+        state["switch_history"] = []
+
     state["switch_history"].append({
         "from_bot": old_index,
         "to_bot": new_index,
@@ -357,6 +370,65 @@ def fix_bot():
         "status": "success",
         "message": "Bot lock has been forcibly released."
     })
+
+
+@app.route('/bots_info', methods=['GET'])
+def bots_info():
+    """
+    Returns details about the active Pyrogram session (sender)
+    and the available target bots (receivers).
+    """
+    state = get_bot_state()
+    total_sessions = len(TelegramConfig.SESSIONS)
+
+    return jsonify({
+        "client_sessions": {
+            "active_index": state["active_index"],
+            "total_available": total_sessions,
+            "last_switch_time": state.get("last_switch_time"),
+            "switch_history_count": len(state.get("switch_history", []))
+        },
+        "target_bots_available": ENCRYPT_BOTS,
+        "system_status": {
+            "is_processing_request": IS_BOT_RUNNING
+        }
+    })
+
+
+@app.route('/switch_session', methods=['GET'])
+def switch_session():
+    """
+    Switches the active Pyrogram session.
+    Pass ?index=X to switch to a specific session index.
+    If no index is passed, it toggles to the next one automatically.
+    """
+    # Prevent switching if the bot is currently in the middle of a request
+    if IS_BOT_RUNNING:
+        return jsonify({
+            "error": "Cannot switch sessions while the bot is actively processing a search."
+        }), 409
+
+    target = request.args.get('index')
+    total_sessions = len(TelegramConfig.SESSIONS)
+
+    try:
+        if target is not None:
+            target_idx = int(target)
+            if target_idx < 0 or target_idx >= total_sessions:
+                return jsonify({
+                    "error": f"Invalid index. Must be between 0 and {total_sessions - 1}"
+                }), 400
+            new_index = switch_bot(target_index=target_idx)
+        else:
+            new_index = switch_bot()  # Default toggle behavior
+
+        return jsonify({
+            "status": "success",
+            "message": f"Successfully switched to client session index {new_index}",
+            "active_index": new_index
+        })
+    except ValueError:
+        return jsonify({"error": "Index parameter must be a valid integer."}), 400
 
 
 if __name__ == "__main__":
