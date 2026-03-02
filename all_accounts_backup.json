@@ -1,0 +1,125 @@
+[
+    {
+        "name": "DP1",
+        "phone": "+5511936188813",
+        "password": null,
+        "paid_subscription": {
+            "sml": false
+        },
+        "session_string": "AQHKdr0AMXQg_WQklx1_lVjhHYxKWvW3-CdNTZOOR6MLmhTIkP2gwvnvCmSHn4GwJcFUjHEDyQvbB0kPFM-NojSdbR4_K35LyEKcgXLWrmwoVVYOSCtlAoxEcSRc4OWlBGiq2vJrM3LXxNOlsAOxJZmRq-7v8e-nYdE7tkrlYfQBqtt71iBlHBUBAw_ZNarWJmxBXPvjvfvYs9rnG_vvwEpFDAtpCGrvMXY7dsSNY62bb7KDuiHVORYXeofZ7Ri7bU57Kjtbg4WPfnJL__Eq4pXeJZGh-A_3AEOPDhKpKfBHPp-Y6N6BjZrcJP-w9PoL_7NcYGYvzHXcrjnkMNqnQis_LwRZQAAAAAHCoNuFAA"
+    },
+    {
+        "name": "SPD 28",
+        "phone": "+5511936207328",
+        "password": null,
+        "paid_subscription": {
+            "sml": false
+        },
+        "session_string": "AQHKdr0AplBc_YaMjar64Yys0dCESezos_ZGnKNUQYhkqdwvRuv46gH2UyyBAdVW015aiP-xY188nu-YTkXjc7cm6idbJ7Z1K7_kkyUYnSPahfRD7i9giyWyaIXRe75na1Mr_um-wScn3OxPFxQd9XWRnI2r_zukS8F2i19nb5i74Yb5QxVegNmpWbBgDbqF-Ki-RN4nK1O3K1uPqSYKqVgSiDFu0k_eql8dSa8SapOMImVDJxeQMZN--DwBVN3ktDytasSinFuK35d4jEMo1MyoQepXpQ1BkYxCMvF0tsNESUGSEfZR7y_WfnmJtq8EfYyNHrQ-0xTidq-jKmhgofOLILlylwAAAAHuY4eUAA"
+    },
+    {
+        "name": "SPD 30",
+        "phone": "+5511936207430",
+        "password": null,
+        "paid_subscription": {
+            "sml": false
+        }
+    },
+    {
+        "name": "SPD 83",
+        "phone": "+5511936207483",
+        "password": null,
+        "paid_subscription": {
+            "sml": false
+        }
+    },
+    {
+        "name": "SPD 44",
+        "phone": "+5511936207544",
+        "password": null,
+        "paid_subscription": {
+            "sml": false
+        }
+    },
+    {
+        "name": "Kalipora Kay",
+        "phone": "+447300823591",
+        "password": "fariFARI0090",
+        "paid_subscription": {
+            "sml": true
+        },
+        "session_string": "BAHKdr0Ajz_-nlu9LZnPCrTzV-tKeGi5_a1tsCs4VIFN3zAvOe5n0ivYQomb2M5sN-0m85-hNUjMZ0LBEb7UWV4w3ZOospihNTWkX2qqJMlpE9uCBiezYM7Eg6FDUfagB5A4e4DDOGOSfsO6eBUhuZgi7sLKeG-WIf4IybHzaxvL2sKOqXPFolGLZpQn2E2bgOS5G7TxEwzQ-IgpOMhpBoyUezBMBvWL2CVk1uMpmMp3p-AJ5BBFoylGq3DgDGUnoDF7juRgJh8nSySCEz_coM67sQA_MZpMVn64CQqRvTyrsfOyRiLyrAT7qUi8mHcIjzgmfknGwFvMkGpNxmbFig6Oe9rnGQAAAAHmI_rdAA"
+    },
+    {
+        "name": "DP2",
+        "phone": "+5511936189082",
+        "password": null,
+        "paid_subscription": {
+            "sml": true
+        },
+        "session_string": "AQHKdr0AWQunPm0_5BwPCRBEz5MkRp9uqZ0KTMyDujPsxaYCiriA_BwxBiuqDJutrlOXw1rgyvGpJUfi5qS6fGOThWNkCWsz7Ke8XOvb9u8aJV6m9ZQkeo1hC0IWKipd9TwwsFRpxWc8aw8mkgQTt10B0cTPzeGfRlPY7IBTNhfCiUpRL9x4hHiWIVG5cpPHQ0zJqAFetqD7xtWZaaF4LdzNmb7ukN4WbyXH8Jre9OxpX_2k4zFTd2_82lwtoSKJEN9NrMvJ7VNwHL6VXY_czT_SQvI9VbwrKyp3IMH-RPf4IOccttMRT7FiBNZyfb40zWNQabRWcwT1NhOhQT9Udvg8B-USHwAAAAH8cPaOAA"
+    },
+    {
+        "name": "DP3 - Premium",
+        "phone": "+5511936193273",
+        "password": null,
+        "paid_subscription": {
+            "sml": true
+        },
+        "session_string": "AQHKdr0ALvx1jf-20oLrIDmvKXW8l3IMn_taY2bGLUjz5RZ0eGLfzj6XXtqIq9pG40daC2HlJ9Kiu8etYomVc2bRew-XPg5f_oKlnq1qTqiYSVSf93nPdwdmIWlZpg0M8u3Cen6Fgc5BL1CaVWdKlHKpwLzlX_TKHRWxM1WFin-XkWO4JyAAKNPvetFJTJDWRGNBit0gdgM_Tli7iYRaiJ34-VZk4p2vhKgUdguk6KWL6ufYcbHLw1QM8uFrZdP3ZCiXHeQwhe5UjOuP-4IFuyIptavqCXC9lOarO_MRPKv2z-8vwty9N3G1pD-5OjfEkNt6LDqiBlLIY2XvIHu66utK02qtwgAAAAHQEsfbAA"
+    },
+    {
+        "name": "SPD 65",
+        "phone": "+5511936207265",
+        "password": null,
+        "paid_subscription": {
+            "sml": false
+        },
+        "session_string": "AQHKdr0APDf4UNqC6or_cVNtOLvJ7T7-xSD2ZAhFLKqV7TFv6Otsrt_Q53MGxPS_Rybb9XINXsnyxHvGbNAy8n68pBjdNJ45OiPPt3cLH5AwAbRVPkdyELJFfvQ63NetkFB7wnaKbI7JVkwqKYRCUCK9PGQPF-yagMb53gAjPZOmuUOYMhcpcIFjGjEGqOVxgh4lYaFEVj-NtrEaGq_jE0xmleJmk0JcTwDtGiIPVaq044Z8Lnl3WBQHJug8-bzUPwvpz2y4lhd0iFiwzf0XAEhDZB_yIQpFyMAGaTXiqgN9SAATVxQD7PIjD-ZumBckpCp1uDgdkggJGuqQGst9Z6VqNv7yCgAAAAHwXTNNAA"
+    },
+    {
+        "name": "SPD 01",
+        "phone": "+5511936207501",
+        "password": null,
+        "paid_subscription": {
+            "sml": false
+        },
+        "session_string": "AQHKdr0AAQ8ZWWGgKMkcniEqEb-dbzAtVbjYo8V6I8ssplgXmA1cq5xpEKPXkMTCdop-H9ohFhgfyJaP_wY4VKaJVn0hKLGTpCxxK_IjMfDJP2N2TgAuWnc2aUcJU3e4XljTTbHtMsxUX0yTSm9Wt8qJUEJ3NaYsPZiUoDB4rf613Z8vLNWqQgFbuo7ucTkIgbq58Y5q6q3PYvp1BWrkv15Q_OnWloyRfc2MhZbjhr1Yy0McrRFbi21YLMruBMNUSGRssnjoPKm8gWpw4A6OZzNE0MnKpH958i6dWcAz1jFXr5ieqPBG0c-paFI1ltY57_TksfTAjF3xElnb0-3OMu0xUKJYzAAAAAHwXnM5AA"
+    },
+    {
+        "name": "SPD 87",
+        "phone": "+5511936207487",
+        "password": null,
+        "paid_subscription": {
+            "sml": false
+        },
+        "session_string": "AQHKdr0AHIP8LKNDHdL0eTAAVwJqGYVX-VG3Wvq3LK1z9NpF0Lz9GKuvxyWTCqJaSbiIUVhYqk6L6VAaA4G_mkM6Ne9Pix9EfpDJiG4cn5wWBO1f5UBQ_FYj_q-3JdQBYPV40WVYNTDcAOZIPhz1EbSygSFlu2FsW2b73Nqy1BsTlf60gAz4uPEHqXZzWZAb1n0IYV1cAGSRBkxcSfadLAPaVxWvJrz39nfhADA1U4pnGr77f59I0-aX7C-Ir1F8bnM0ZQSt0lVekPdXGL0Iek2aedJTMzs5DobVkO9Au-35nYtLl5DGKs3jLIw3gf43c8K2bf0tF_8paVSyXBrCiliKSHYVMAAAAAIKMPefAA"
+    },
+    {
+        "name": "SPD 93",
+        "phone": "+5511936207493",
+        "password": null,
+        "paid_subscription": {
+            "sml": false
+        },
+        "session_string": "AQHKdr0AAX7vQDvjNNlYZ_jph_CEXn8EVjg0--OuArfsYC9_dvz0em-Kxd98DBSpZznH_taOMvvapZinVpnfGq-BrfPbHFJDoq-C3_ifHTl0DdlvDKzxWpvY49YbPUek8dJVxXnhCsgQVcykOhx6wSHqqSBSeHn-KmreVWMIRlNOIgwLv1prgR6Z9ZOmbs9HChBD0fbjK9nlxA3xL0PZM9NpX5fAd3EMGdr4UyTh6z3dskJZ6vn2EV_J1nto6rHGaPnCa-VLpbjSYv-YN_p1hYIaWgd87dlXeBhR_h7ZSrGgUkvxoTYSbn5qMpRxMW13jRdwGC8ig2z54BHWyB5bY6Yqyg-aIQAAAAIHRN97AA"
+    },
+    {
+        "name": "SPD 13",
+        "phone": "+5511936207413",
+        "password": null,
+        "paid_subscription": {
+            "sml": false
+        },
+        "session_string": "AQHKdr0AMihmPUv6xsM9kZiOMmETKiGZ4IPtj2If3dLxhJxC6aZoG7Az21UUS9VuJv3ocW7WvQQM0T_-arqtVNewgk6knvZvMt9FKMRwqh9ihInv7pbGmUOuFKSIRxLq7EyF9JSvEPH-DMakI3PweFyFCGHVfILbS0U6a58egTZiZPtY3IsJ2uNNYsN-Bn2VGCK4SB_VSncXBozQAygzOPInE9z2AMoWdaNA9vH8Q6cxVmC4KY2UelZu4nlFz6q9-58DdpWgTU5OivgnWRLlEoXzZ0a7ee7Jq7DA_NoK3veyRKqrqdjaKWeZQLU1XQKIJfy7eEnkKiE23TnoOqsnJ4YZNT9IKgAAAAIEWIEuAA"
+    },
+    {
+        "name": "SPD 20",
+        "phone": "+5511936207420",
+        "password": null,
+        "paid_subscription": {
+            "sml": false
+        },
+        "session_string": "AQHKdr0ApnplanHeMwEM9Ub8B-LbSs1dA56_Uz9s0jhaSHaWvRko7ngM_TXG_jQrNLP9A08FwjX0zxRd1qY077BOyFYlV8biMdZ5GdnpXSS10CHUz9VGrilBXrimbdgYkJRCe-GsmXJIavDcb6kynmJ-xTx0oO8iyH25RlrnDiyubghbnAAtUWzOryvfn4-tuoMYVZfDsAf1HqLJfbLoS_Kj1zrqcKdrTRmv6ZDWRJP0ppTUvJOPKvTB70Kq2Xe4nuMllxslKqzLl7b0zdmKJrQnAI2D6Lnuuyt-fuacTkqdxWpXq9jOTK2DPCsu_JKHy_eqiARg-DBfjl8xeX3gWJl6ZFQJcAAAAAIF2N9wAA"
+    }
+]

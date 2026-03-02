@@ -1,54 +1,89 @@
-# Written by Hamza Farahat <farahat.hamza1@gmail.com>, 1/29/2026
-# Contact me for more information:
-# Contact Us: https://terabyte-26.com/quick-links/
-# Telegram: @hamza_farahat or https://t.me/hamza_farahat
-# WhatsApp: +212772177012
-
-import json
 import os
+import json
+import asyncio
 from pyrogram import Client
-from dotenv import set_key
+
+# Make sure this imports your updated TelegramConfig
+from consts import TelegramConfig
+
+ACCOUNTS_FILE = "live_accounts.json"
 
 
 async def generate_missing_sessions():
-    api_id = int(os.getenv("API_ID"))
-    api_hash = os.getenv("API_HASH")
+    """
+    Scans live_accounts.json for any accounts missing a session_string.
+    Prompts the user to log in (OTP/2FA) and saves the session string directly back to the JSON.
+    """
+    print("\n--- 🔐 Starting Session Manager ---")
 
-    # Load account info
-    with open("accounts.json", "r") as f:
-        accounts = json.load(f)
+    # 1. Load the accounts
+    try:
+        with open(ACCOUNTS_FILE, "r") as f:
+            accounts = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        print(f"❌ Error: Could not read {ACCOUNTS_FILE}. Make sure the file exists and is valid JSON.")
+        return
 
-    session_strings = []
+    changes_made = False
 
-    for acc in accounts:
-        phone = acc["phone"]
-        password = acc.get("password")
+    # 2. Iterate through each account
+    for index, account in enumerate(accounts):
+        phone = account.get("phone")
+        name = account.get("name", f"Account_{index}")
+        password = account.get("password")
 
-        print(f"\n--- Logging into: {phone} ---")
-        # We use in_memory=True so it doesn't create .session files
-        app = Client(f"session_{phone}", api_id, api_hash, in_memory=True)
+        # If the session string already exists and is not empty/null, skip it
+        if account.get("session_string"):
+            print(f"✅ Session already exists for {name} ({phone}). Skipping...")
+            continue
 
-        await app.connect()
+        print(f"\n⚠️ No session found for {name} ({phone}). Initializing login...")
 
-        # Request Code
-        sent_code = await app.send_code(phone)
-        code = input(f"Enter the code sent to {phone}: ")
+        # 3. Create an in-memory Pyrogram client
+        # We use in_memory=True so it doesn't create .session files on your disk
+        client = Client(
+            name=name,
+            api_id=TelegramConfig.API_ID,
+            api_hash=TelegramConfig.API_HASH,
+            phone_number=phone,
+            password=password,  # Pyrogram will use this if 2FA is enabled
+            in_memory=True
+        )
 
         try:
-            await app.sign_in(phone, sent_code.phone_code_hash, code)
+            # 4. Start the client (This will prompt you for the OTP in the terminal)
+            await client.start()
+
+            # 5. Export the session string
+            session_string = await client.export_session_string()
+
+            # 6. Save it to the dictionary
+            account["session_string"] = session_string
+            changes_made = True
+
+            print(f"🎉 Successfully generated and captured session string for {name}!")
+
+            # Stop the client safely before moving to the next one
+            await client.stop()
+
+            # 7. Write back to live_accounts.json IMMEDIATELY after each successful login
+            # This ensures if the script crashes on account #5, you don't lose the sessions for #1-4
+            with open(ACCOUNTS_FILE, "w") as f_out:
+                json.dump(accounts, f_out, indent=4)
+
+            print(f"💾 Saved {name}'s session to {ACCOUNTS_FILE}.")
+
         except Exception as e:
-            # Handle 2FA if password is provided
-            if "SESSION_PASSWORD_NEEDED" in str(e) and password:
-                await app.check_password(password)
-            else:
-                raise e
+            print(f"❌ Failed to generate session for {name} ({phone}): {e}")
+            continue
 
-        string = await app.export_session_string()
-        session_strings.append(string)
-        print(f"✅ Session generated for {phone}")
-        await app.disconnect()
+    if changes_made:
+        print("\n✅ Session generation complete. All new sessions saved to live_accounts.json!")
+    else:
+        print("\n✅ All accounts already have valid sessions. Nothing to do.")
 
-    # Save to .env for future use
-    combined_strings = ",".join(session_strings)
-    set_key(".env", "SESSION_STRINGS", combined_strings)
-    return session_strings
+
+# Allow the file to be run directly from the terminal for manual setup
+if __name__ == "__main__":
+    asyncio.run(generate_missing_sessions())
+

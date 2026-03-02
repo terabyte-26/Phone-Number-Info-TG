@@ -12,7 +12,7 @@ import datetime
 
 from pyrogram import Client
 from pyrogram.storage import MemoryStorage
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template, redirect, url_for
 
 from ai_helpers import get_groq_raw_response
 from consts import TelegramConfig
@@ -50,18 +50,152 @@ logger.addHandler(console_handler)
 
 
 def startup_check():
-    # Only run if SESSION_STRINGS is empty or missing in .env
-    if not os.getenv("SESSION_STRINGS"):
-        logger.info("No sessions found. Starting automatic setup...")
+    # Reload from consts to ensure we have the latest data
+    from consts import TelegramConfig
+
+    if not TelegramConfig.SESSIONS:
+        logger.info("No valid session_string found in live_accounts.json. Starting automatic setup...")
         loop = asyncio.get_event_loop()
         loop.run_until_complete(generate_missing_sessions())
     else:
-        logger.info("✅ Sessions loaded from environment.")
+        logger.info(f"✅ {len(TelegramConfig.SESSIONS)} Sessions loaded from live_accounts.json.")
 
 
 
 
 STATE_FILE = "bot_state.json"
+LIVE_ACCOUNTS_FILE = "live_accounts.json"
+ALL_ACCOUNTS_FILE = "all_accounts.json"
+DEFAULT_SUBSCRIPTION_DATE = "2027-02-25"
+
+
+def load_accounts(file_path: str) -> list[dict]:
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, list) else []
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+
+def save_accounts(file_path: str, accounts: list[dict]) -> None:
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(accounts, f, indent=4, ensure_ascii=False)
+
+
+def normalize_paid_subscriptions(raw_value) -> dict[str, str]:
+    subscriptions = {}
+
+    if isinstance(raw_value, bool):
+        if raw_value:
+            subscriptions["sml"] = DEFAULT_SUBSCRIPTION_DATE
+        return subscriptions
+
+    if isinstance(raw_value, dict):
+        for key, value in raw_value.items():
+            sub_name = str(key).strip().lower()
+            if not sub_name:
+                continue
+
+            if isinstance(value, bool):
+                if value:
+                    subscriptions[sub_name] = DEFAULT_SUBSCRIPTION_DATE
+            else:
+                sub_date = str(value).strip()
+                if sub_date:
+                    subscriptions[sub_name] = sub_date
+        return subscriptions
+
+    if isinstance(raw_value, list):
+        for item in raw_value:
+            if not isinstance(item, dict):
+                continue
+            sub_name = str(item.get("name", "")).strip().lower()
+            sub_date = str(item.get("date", "")).strip()
+            if sub_name and sub_date:
+                subscriptions[sub_name] = sub_date
+        return subscriptions
+
+    return subscriptions
+
+
+def migrate_accounts_file(file_path: str) -> list[dict]:
+    accounts = load_accounts(file_path)
+    changed = False
+
+    for account in accounts:
+        current = account.get("paid_subscription")
+        normalized = normalize_paid_subscriptions(current)
+        if current != normalized:
+            account["paid_subscription"] = normalized
+            changed = True
+
+    if changed:
+        save_accounts(file_path, accounts)
+
+    return accounts
+
+
+def refresh_live_sessions() -> None:
+    from consts import TelegramConfig
+    live_accounts = load_accounts(LIVE_ACCOUNTS_FILE)
+    TelegramConfig.SESSIONS = [
+        acc.get("session_string")
+        for acc in live_accounts
+        if acc.get("session_string")
+    ]
+
+
+def get_target_file(target: str) -> str | None:
+    target_map = {
+        "live": LIVE_ACCOUNTS_FILE,
+        "all": ALL_ACCOUNTS_FILE,
+    }
+    return target_map.get((target or "").lower())
+
+
+def account_from_form(form) -> tuple[dict | None, str | None]:
+    name = (form.get("name") or "").strip()
+    phone = (form.get("phone") or "").strip()
+    password = (form.get("password") or "").strip() or None
+    session_string = (form.get("session_string") or "").strip() or None
+    subscriptions_raw = (form.get("subscriptions_json") or "").strip()
+
+    if not name:
+        return None, "Name is required."
+    if not phone:
+        return None, "Phone is required."
+
+    subscriptions = {}
+    if subscriptions_raw:
+        try:
+            parsed_subscriptions = json.loads(subscriptions_raw)
+            if not isinstance(parsed_subscriptions, list):
+                return None, "Subscriptions payload is invalid."
+            for item in parsed_subscriptions:
+                if not isinstance(item, dict):
+                    continue
+                sub_name = str(item.get("name", "")).strip().lower()
+                sub_date = str(item.get("date", "")).strip()
+                if sub_name and sub_date:
+                    subscriptions[sub_name] = sub_date
+        except json.JSONDecodeError:
+            return None, "Subscriptions payload is invalid."
+
+    # Backward compatibility for legacy checkbox posts.
+    if form.get("paid_sml") == "on" and "sml" not in subscriptions:
+        subscriptions["sml"] = DEFAULT_SUBSCRIPTION_DATE
+
+    account = {
+        "name": name,
+        "phone": phone,
+        "password": password,
+        "paid_subscription": subscriptions
+    }
+    if session_string:
+        account["session_string"] = session_string
+
+    return account, None
 
 
 def get_bot_state():
@@ -190,6 +324,86 @@ def home():
         "status": "Running",
     }
     return jsonify(app_info)
+
+
+@app.route('/accounts/dashboard', methods=['GET'])
+def accounts_dashboard():
+    live_accounts = migrate_accounts_file(LIVE_ACCOUNTS_FILE)
+    all_accounts = migrate_accounts_file(ALL_ACCOUNTS_FILE)
+    refresh_live_sessions()
+    return render_template(
+        "accounts_dashboard.html",
+        live_accounts=live_accounts,
+        all_accounts=all_accounts,
+        default_subscription_date=DEFAULT_SUBSCRIPTION_DATE,
+        message=request.args.get("message"),
+        error=request.args.get("error"),
+    )
+
+
+@app.route('/accounts/add', methods=['POST'])
+def add_account():
+    target = (request.form.get("target") or "").lower()
+    file_path = get_target_file(target)
+    if not file_path:
+        return redirect(url_for("accounts_dashboard", error="Invalid target list."))
+
+    account, error = account_from_form(request.form)
+    if error:
+        return redirect(url_for("accounts_dashboard", error=error))
+
+    accounts = load_accounts(file_path)
+    accounts.append(account)
+    save_accounts(file_path, accounts)
+
+    if target == "live":
+        refresh_live_sessions()
+
+    return redirect(url_for("accounts_dashboard", message="Account added successfully."))
+
+
+@app.route('/accounts/edit/<target>/<int:index>', methods=['POST'])
+def edit_account(target: str, index: int):
+    target = (target or "").lower()
+    file_path = get_target_file(target)
+    if not file_path:
+        return redirect(url_for("accounts_dashboard", error="Invalid target list."))
+
+    accounts = load_accounts(file_path)
+    if index < 0 or index >= len(accounts):
+        return redirect(url_for("accounts_dashboard", error="Invalid account index."))
+
+    account, error = account_from_form(request.form)
+    if error:
+        return redirect(url_for("accounts_dashboard", error=error))
+
+    accounts[index] = account
+    save_accounts(file_path, accounts)
+
+    if target == "live":
+        refresh_live_sessions()
+
+    return redirect(url_for("accounts_dashboard", message="Account updated successfully."))
+
+
+@app.route('/accounts/delete/<target>/<int:index>', methods=['POST'])
+def delete_account(target: str, index: int):
+    target = (target or "").lower()
+    file_path = get_target_file(target)
+    if not file_path:
+        return redirect(url_for("accounts_dashboard", error="Invalid target list."))
+
+    accounts = load_accounts(file_path)
+    if index < 0 or index >= len(accounts):
+        return redirect(url_for("accounts_dashboard", error="Invalid account index."))
+
+    accounts.pop(index)
+    save_accounts(file_path, accounts)
+
+    if target == "live":
+        refresh_live_sessions()
+
+    return redirect(url_for("accounts_dashboard", message="Account deleted successfully."))
 
 
 ENCRYPT_BOTS: dict[str: str]= {
