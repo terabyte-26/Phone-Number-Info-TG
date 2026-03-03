@@ -9,6 +9,7 @@ import re
 import json
 import asyncio
 import datetime
+import threading
 
 from pyrogram import Client
 from pyrogram.storage import MemoryStorage
@@ -65,7 +66,9 @@ def startup_check():
 
 STATE_FILE = "bot_state.json"
 LIVE_ACCOUNTS_FILE = "live_accounts.json"
+BACKUP_PLAN_FILE = "backup_plan_accounts.json"
 ALL_ACCOUNTS_FILE = "all_accounts.json"
+ALL_ACCOUNTS_BACKUP_FILE = "all_accounts_backup.json"
 DEFAULT_SUBSCRIPTION_DATE = "2027-02-25"
 
 
@@ -136,22 +139,93 @@ def migrate_accounts_file(file_path: str) -> list[dict]:
     return accounts
 
 
-def refresh_live_sessions() -> None:
+def sync_account_files(all_accs: list[dict] | None = None) -> None:
+    """Rebuild all derived account files from all_accounts.json and refresh
+    the in-memory session pool.
+
+    File responsibilities:
+    - live_accounts.json        → accounts with mode == 'live'   (used by the bot)
+    - backup_plan_accounts.json → accounts with mode == 'backup' (standby pool)
+    - all_accounts_backup.json  → full safety copy of all_accounts.json
+    """
+    if all_accs is None:
+        all_accs = load_accounts(ALL_ACCOUNTS_FILE)
+
+    live_accs   = [acc for acc in all_accs if acc.get("mode") == "live"]
+    backup_accs = [acc for acc in all_accs if acc.get("mode") == "backup"]
+
+    save_accounts(LIVE_ACCOUNTS_FILE,     live_accs)
+    save_accounts(BACKUP_PLAN_FILE,       backup_accs)
+    save_accounts(ALL_ACCOUNTS_BACKUP_FILE, all_accs)   # safety copy
+
     from consts import TelegramConfig
-    live_accounts = load_accounts(LIVE_ACCOUNTS_FILE)
     TelegramConfig.SESSIONS = [
-        acc.get("session_string")
-        for acc in live_accounts
-        if acc.get("session_string")
+        acc["session_string"] for acc in live_accs if acc.get("session_string")
     ]
 
 
-def get_target_file(target: str) -> str | None:
-    target_map = {
-        "live": LIVE_ACCOUNTS_FILE,
-        "all": ALL_ACCOUNTS_FILE,
-    }
-    return target_map.get((target or "").lower())
+def ensure_unified_accounts() -> list[dict]:
+    """One-time-safe migration that makes all_accounts.json the single source of
+    truth, then returns the up-to-date list.
+
+    What it does:
+    1. Merges accounts present only in live_accounts.json or backup_plan_accounts.json
+       into all_accounts.json with the correct mode stamp.
+    2. Stamps a ``mode`` field ('live' | 'backup') on any account that lacks one,
+       using live_accounts.json / backup_plan_accounts.json as the hint.
+    3. Normalises ``paid_subscription`` on every account.
+    """
+    all_accs    = load_accounts(ALL_ACCOUNTS_FILE)
+    live_accs   = load_accounts(LIVE_ACCOUNTS_FILE)
+    backup_accs = load_accounts(BACKUP_PLAN_FILE)
+
+    live_phones   = {acc.get("phone") for acc in live_accs   if acc.get("phone")}
+    backup_phones = {acc.get("phone") for acc in backup_accs if acc.get("phone")}
+    all_phones    = {acc.get("phone") for acc in all_accs    if acc.get("phone")}
+
+    changed = False
+
+    # 1a. Pull in accounts that exist only in live_accounts.json
+    for acc in live_accs:
+        phone = acc.get("phone")
+        if phone and phone not in all_phones:
+            entry = dict(acc)
+            entry["mode"] = "live"
+            all_accs.append(entry)
+            all_phones.add(phone)
+            changed = True
+
+    # 1b. Pull in accounts that exist only in backup_plan_accounts.json
+    for acc in backup_accs:
+        phone = acc.get("phone")
+        if phone and phone not in all_phones:
+            entry = dict(acc)
+            entry["mode"] = "backup"
+            all_accs.append(entry)
+            all_phones.add(phone)
+            changed = True
+
+    # 2 & 3. Stamp mode + normalise subscriptions
+    for acc in all_accs:
+        if "mode" not in acc:
+            phone = acc.get("phone")
+            if phone in live_phones:
+                acc["mode"] = "live"
+            elif phone in backup_phones:
+                acc["mode"] = "backup"
+            else:
+                acc["mode"] = "backup"
+            changed = True
+        current = acc.get("paid_subscription")
+        normalised = normalize_paid_subscriptions(current)
+        if current != normalised:
+            acc["paid_subscription"] = normalised
+            changed = True
+
+    if changed:
+        save_accounts(ALL_ACCOUNTS_FILE, all_accs)
+
+    return all_accs
 
 
 def account_from_form(form) -> tuple[dict | None, str | None]:
@@ -160,6 +234,9 @@ def account_from_form(form) -> tuple[dict | None, str | None]:
     password = (form.get("password") or "").strip() or None
     session_string = (form.get("session_string") or "").strip() or None
     subscriptions_raw = (form.get("subscriptions_json") or "").strip()
+    mode = (form.get("mode") or "backup").strip().lower()
+    if mode not in ("live", "backup"):
+        mode = "backup"
 
     if not name:
         return None, "Name is required."
@@ -190,7 +267,8 @@ def account_from_form(form) -> tuple[dict | None, str | None]:
         "name": name,
         "phone": phone,
         "password": password,
-        "paid_subscription": subscriptions
+        "paid_subscription": subscriptions,
+        "mode": mode,
     }
     if session_string:
         account["session_string"] = session_string
@@ -328,13 +406,13 @@ def home():
 
 @app.route('/accounts/dashboard', methods=['GET'])
 def accounts_dashboard():
-    live_accounts = migrate_accounts_file(LIVE_ACCOUNTS_FILE)
-    all_accounts = migrate_accounts_file(ALL_ACCOUNTS_FILE)
-    refresh_live_sessions()
+    all_accounts = ensure_unified_accounts()
+    sync_account_files(all_accounts)
+    live_accounts = [acc for acc in all_accounts if acc.get("mode") == "live"]
     return render_template(
         "accounts_dashboard.html",
-        live_accounts=live_accounts,
         all_accounts=all_accounts,
+        live_accounts=live_accounts,
         default_subscription_date=DEFAULT_SUBSCRIPTION_DATE,
         message=request.args.get("message"),
         error=request.args.get("error"),
@@ -343,65 +421,44 @@ def accounts_dashboard():
 
 @app.route('/accounts/add', methods=['POST'])
 def add_account():
-    target = (request.form.get("target") or "").lower()
-    file_path = get_target_file(target)
-    if not file_path:
-        return redirect(url_for("accounts_dashboard", error="Invalid target list."))
-
     account, error = account_from_form(request.form)
     if error:
         return redirect(url_for("accounts_dashboard", error=error))
 
-    accounts = load_accounts(file_path)
-    accounts.append(account)
-    save_accounts(file_path, accounts)
-
-    if target == "live":
-        refresh_live_sessions()
+    all_accs = load_accounts(ALL_ACCOUNTS_FILE)
+    all_accs.append(account)
+    save_accounts(ALL_ACCOUNTS_FILE, all_accs)
+    sync_account_files(all_accs)
 
     return redirect(url_for("accounts_dashboard", message="Account added successfully."))
 
 
-@app.route('/accounts/edit/<target>/<int:index>', methods=['POST'])
-def edit_account(target: str, index: int):
-    target = (target or "").lower()
-    file_path = get_target_file(target)
-    if not file_path:
-        return redirect(url_for("accounts_dashboard", error="Invalid target list."))
-
-    accounts = load_accounts(file_path)
-    if index < 0 or index >= len(accounts):
+@app.route('/accounts/edit/<int:index>', methods=['POST'])
+def edit_account(index: int):
+    all_accs = load_accounts(ALL_ACCOUNTS_FILE)
+    if index < 0 or index >= len(all_accs):
         return redirect(url_for("accounts_dashboard", error="Invalid account index."))
 
     account, error = account_from_form(request.form)
     if error:
         return redirect(url_for("accounts_dashboard", error=error))
 
-    accounts[index] = account
-    save_accounts(file_path, accounts)
-
-    if target == "live":
-        refresh_live_sessions()
+    all_accs[index] = account
+    save_accounts(ALL_ACCOUNTS_FILE, all_accs)
+    sync_account_files(all_accs)
 
     return redirect(url_for("accounts_dashboard", message="Account updated successfully."))
 
 
-@app.route('/accounts/delete/<target>/<int:index>', methods=['POST'])
-def delete_account(target: str, index: int):
-    target = (target or "").lower()
-    file_path = get_target_file(target)
-    if not file_path:
-        return redirect(url_for("accounts_dashboard", error="Invalid target list."))
-
-    accounts = load_accounts(file_path)
-    if index < 0 or index >= len(accounts):
+@app.route('/accounts/delete/<int:index>', methods=['POST'])
+def delete_account(index: int):
+    all_accs = load_accounts(ALL_ACCOUNTS_FILE)
+    if index < 0 or index >= len(all_accs):
         return redirect(url_for("accounts_dashboard", error="Invalid account index."))
 
-    accounts.pop(index)
-    save_accounts(file_path, accounts)
-
-    if target == "live":
-        refresh_live_sessions()
+    all_accs.pop(index)
+    save_accounts(ALL_ACCOUNTS_FILE, all_accs)
+    sync_account_files(all_accs)
 
     return redirect(url_for("accounts_dashboard", message="Account deleted successfully."))
 
@@ -412,7 +469,9 @@ ENCRYPT_BOTS: dict[str: str]= {
     'AML': 'ASocialMediaLeaksBot ', # Monthly fee (paid)
 }
 
-IS_BOT_RUNNING: bool = False
+# Threading lock — only one request is served at a time.
+# Any concurrent request gets an immediate "busy" response; no queuing, no waiting.
+_bot_lock = threading.Lock()
 
 
 # Flask route to handle GET requests
@@ -420,19 +479,7 @@ IS_BOT_RUNNING: bool = False
 
 @app.route('/search_phone', methods=['GET'])
 async def search_phone():
-    global IS_BOT_RUNNING
-
-    # 1. Check if bot is busy
-    if IS_BOT_RUNNING:
-        return jsonify({
-            "status": "busy",
-            "message": "The bot is currently processing another request. Please try again in a few seconds."
-        }), 503
-
-    state = get_bot_state()
-    current_session = TelegramConfig.SESSIONS[state["active_index"]]
-
-    # 2. Validate Inputs
+    # 1. Validate inputs BEFORE acquiring the lock so bad requests fail fast
     message_text = request.args.get("input", "")
     source = request.args.get("source", "")
 
@@ -445,11 +492,21 @@ async def search_phone():
     if not bot_username:
         return jsonify({"error": "Invalid bot source provided."}), 400
 
+    # 2. Try to acquire the lock without blocking — if already taken, respond busy immediately
+    if not _bot_lock.acquire(blocking=False):
+        logger.info(f"Bot busy — rejecting request for '{message_text}' immediately.")
+        return jsonify({
+            "status": "busy",
+            "message": "The bot is currently processing another request. Please try again in a few seconds."
+        }), 503
+
+    state = get_bot_state()
+    current_session = TelegramConfig.SESSIONS[state["active_index"]]
+
     # 3. Initialize Bot
     tg_bot = None
 
     try:
-        IS_BOT_RUNNING = True
 
         # Initialize Client with Memory Storage (Fixes "Database Locked")
         tg_bot = Client(
@@ -568,21 +625,27 @@ async def search_phone():
         if tg_bot and tg_bot.is_connected:
             await tg_bot.stop()
 
-        logger.info("Releasing bot lock...")
-        IS_BOT_RUNNING = False
+        logger.info("Bot lock released.")
+        _bot_lock.release()
 
 
 @app.route('/fix', methods=['GET'])
 def fix_bot():
     """
-    Resets the internal busy lock.
-    (No need to stop Pyrogram here as the main route handles cleanup safely now).
+    Forcibly releases the bot lock if it is currently held (e.g. after a crash).
+    Safe to call at any time — returns whether the lock was actually released.
     """
-    global IS_BOT_RUNNING
-    IS_BOT_RUNNING = False
+    if _bot_lock.locked():
+        _bot_lock.release()
+        logger.warning("Bot lock forcibly released via /fix endpoint.")
+        return jsonify({
+            "status": "success",
+            "message": "Bot lock was held and has been forcibly released."
+        })
+
     return jsonify({
         "status": "success",
-        "message": "Bot lock has been forcibly released."
+        "message": "Bot was not locked — nothing to release."
     })
 
 
@@ -604,7 +667,7 @@ def bots_info():
         },
         "target_bots_available": ENCRYPT_BOTS,
         "system_status": {
-            "is_processing_request": IS_BOT_RUNNING
+            "is_processing_request": _bot_lock.locked()
         }
     })
 
@@ -617,7 +680,7 @@ def switch_session():
     If no index is passed, it toggles to the next one automatically.
     """
     # Prevent switching if the bot is currently in the middle of a request
-    if IS_BOT_RUNNING:
+    if _bot_lock.locked():
         return jsonify({
             "error": "Cannot switch sessions while the bot is actively processing a search."
         }), 409
