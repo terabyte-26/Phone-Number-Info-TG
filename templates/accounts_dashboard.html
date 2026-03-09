@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Accounts Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/accounts_dashboard.css') }}">
 </head>
 <body>
@@ -32,14 +35,6 @@
 
 {%- macro icon_link() -%}
 <svg {{ ic(20) }} aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-{%- endmacro -%}
-
-{%- macro icon_check() -%}
-<svg {{ ic(16) }} stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-{%- endmacro -%}
-
-{%- macro icon_alert() -%}
-<svg {{ ic(16) }} aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
 {%- endmacro -%}
 
 {%- macro icon_search() -%}
@@ -86,82 +81,193 @@
 <svg {{ ic(14) }} aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
 {%- endmacro -%}
 
+{%- macro icon_terminal() -%}
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+{%- endmacro -%}
+
+{%- macro icon_trash() -%}
+<svg {{ ic(14) }} aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+{%- endmacro -%}
+
+{%- macro icon_save() -%}
+<svg {{ ic(14) }} aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+{%- endmacro -%}
+
+{%- macro icon_power() -%}
+<svg {{ ic(14) }} aria-hidden="true"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+{%- endmacro -%}
+
+{%- macro icon_shield() -%}
+<svg {{ ic(14) }} aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+{%- endmacro -%}
+
+{%- macro icon_key() -%}
+<svg {{ ic(14) }} aria-hidden="true"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+{%- endmacro -%}
+
+{%- macro icon_copy() -%}
+<svg {{ ic(14) }} aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+{%- endmacro -%}
+
+{%- macro icon_filter() -%}
+<svg {{ ic(14) }} aria-hidden="true"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+{%- endmacro -%}
+
+{%- macro icon_activity() -%}
+<svg {{ ic(20) }} aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+{%- endmacro -%}
+
+{%- macro icon_dot_pulse() -%}
+<svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="5" fill="currentColor" opacity="0.3"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>
+{%- endmacro -%}
+
+{%- macro icon_layers() -%}
+<svg {{ ic(14) }} aria-hidden="true"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+{%- endmacro -%}
+
+{%- macro icon_chevron_right() -%}
+<svg {{ ic(14) }} aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+{%- endmacro -%}
+
+{%- macro icon_external() -%}
+<svg {{ ic(12) }} aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+{%- endmacro -%}
+
+{%- macro icon_hash() -%}
+<svg {{ ic(14) }} aria-hidden="true"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></svg>
+{%- endmacro -%}
+
+{%- macro icon_clock() -%}
+<svg {{ ic(12) }} aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+{%- endmacro -%}
+
+{%- macro icon_refresh() -%}
+<svg {{ ic(14) }} aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+{%- endmacro -%}
+
 
 <div class="page-shell">
 
-    <!-- ── Topbar ── -->
+    <!-- Topbar -->
     <header class="topbar">
-        <div class="topbar-brand">
-            <div class="topbar-icon">{{ icon_send() }}</div>
-            <div>
-                <h1>Accounts Dashboard</h1>
-                <p>Manage live and all accounts in one place</p>
+        <div class="topbar-left">
+            <div class="topbar-brand">
+                <div class="topbar-icon">{{ icon_send() }}</div>
+                <div>
+                    <h1>Accounts</h1>
+                    <div class="topbar-breadcrumb">
+                        <span>Dashboard</span>
+                        {{ icon_chevron_right() }}
+                        <span class="breadcrumb-active">Account Pool</span>
+                    </div>
+                </div>
             </div>
         </div>
         <div class="topbar-actions">
+            <a class="ghost-link" href="{{ url_for('home') }}" target="_blank" rel="noopener noreferrer">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                API
+                {{ icon_external() }}
+            </a>
             <button type="button" class="btn primary" id="openAddAccountModal">
-                {{ icon_plus() }} Add Account
+                {{ icon_plus() }} New Account
             </button>
-            <a class="ghost-link" href="{{ url_for('home') }}">API Home</a>
         </div>
     </header>
 
-    <!-- ── Stats ── -->
+    <!-- Stats -->
     <section class="stat-grid">
-        <article class="stat-card">
-            <div class="stat-card-top">
-                <span class="stat-label">Live Accounts</span>
-                <div class="stat-icon">{{ icon_smartphone() }}</div>
+        <article class="stat-card" data-accent="purple">
+            <div class="stat-card-inner">
+                <div class="stat-content">
+                    <span class="stat-label">Total Accounts</span>
+                    <strong class="stat-value" data-count="{{ all_accounts|length }}">{{ all_accounts|length }}</strong>
+                </div>
+                <div class="stat-icon-wrap">
+                    <div class="stat-icon">{{ icon_users() }}</div>
+                </div>
             </div>
-            <strong class="stat-value">{{ live_accounts|length }}</strong>
+            <div class="stat-bar"><div class="stat-bar-fill" style="width: 100%"></div></div>
         </article>
-        <article class="stat-card">
-            <div class="stat-card-top">
-                <span class="stat-label">All Accounts</span>
-                <div class="stat-icon">{{ icon_users() }}</div>
+        <article class="stat-card" data-accent="blue">
+            <div class="stat-card-inner">
+                <div class="stat-content">
+                    <span class="stat-label">Live Accounts</span>
+                    <strong class="stat-value" data-count="{{ live_accounts|length }}">{{ live_accounts|length }}</strong>
+                </div>
+                <div class="stat-icon-wrap">
+                    <div class="stat-icon">{{ icon_activity() }}</div>
+                </div>
             </div>
-            <strong class="stat-value">{{ all_accounts|length }}</strong>
+            <div class="stat-bar"><div class="stat-bar-fill" style="width: {{ [((live_accounts|length) / ([all_accounts|length, 1]|max) * 100), 100]|min }}%"></div></div>
         </article>
-        <article class="stat-card">
-            <div class="stat-card-top">
-                <span class="stat-label">Live With Sessions</span>
-                <div class="stat-icon">{{ icon_link() }}</div>
+        <article class="stat-card" data-accent="green">
+            <div class="stat-card-inner">
+                <div class="stat-content">
+                    <span class="stat-label">Active Sessions</span>
+                    <strong class="stat-value" data-count="{{ live_accounts|selectattr('session_string')|list|length }}">{{ live_accounts|selectattr("session_string")|list|length }}</strong>
+                </div>
+                <div class="stat-icon-wrap">
+                    <div class="stat-icon">{{ icon_dot_pulse() }}</div>
+                </div>
             </div>
-            <strong class="stat-value">{{ live_accounts|selectattr("session_string")|list|length }}</strong>
+            <div class="stat-bar"><div class="stat-bar-fill" style="width: {{ [((live_accounts|selectattr('session_string')|list|length) / ([live_accounts|length, 1]|max) * 100), 100]|min }}%"></div></div>
         </article>
-        <article class="stat-card">
-            <div class="stat-card-top">
-                <span class="stat-label">With Subscription</span>
-                <div class="stat-icon">{{ icon_credit_card() }}</div>
+        <article class="stat-card" data-accent="amber">
+            <div class="stat-card-inner">
+                <div class="stat-content">
+                    <span class="stat-label">Subscriptions</span>
+                    <strong class="stat-value" data-count="{{ all_accounts|selectattr('paid_subscription')|list|length }}">{{ all_accounts|selectattr("paid_subscription")|list|length }}</strong>
+                </div>
+                <div class="stat-icon-wrap">
+                    <div class="stat-icon">{{ icon_credit_card() }}</div>
+                </div>
             </div>
-            <strong class="stat-value">{{ all_accounts|selectattr("paid_subscription")|list|length }}</strong>
+            <div class="stat-bar"><div class="stat-bar-fill" style="width: {{ [((all_accounts|selectattr('paid_subscription')|list|length) / ([all_accounts|length, 1]|max) * 100), 100]|min }}%"></div></div>
         </article>
     </section>
 
-    <!-- Flash seeds — consumed by the toast system in JS -->
-    {% if message %}<div class="flash-data" data-type="success" data-msg="{{ message }}" hidden></div>{% endif %}
-    {% if error %}<div class="flash-data" data-type="error" data-msg="{{ error }}" hidden></div>{% endif %}
+    <!-- Flash seeds — consumed once by JS toast system -->
+    {% for category, msg in flashes %}
+    <div class="flash-data" data-type="{{ category }}" data-msg="{{ msg }}" hidden></div>
+    {% endfor %}
 
-    <!-- ── Search bar ── -->
-    <div class="filter-bar">
+    <!-- Toolbar: Search + Filter -->
+    <div class="toolbar">
         <div class="search-wrapper">
             <span class="search-icon">{{ icon_search() }}</span>
-            <input id="accountSearchInput" type="text" placeholder="Search by name or phone number&hellip;">
+            <input id="accountSearchInput" type="text" placeholder="Search accounts...">
+            <kbd class="search-kbd">/</kbd>
+        </div>
+        <div class="filter-chips" id="filterChips">
+            <button type="button" class="filter-chip active" data-filter="all">
+                {{ icon_layers() }} All <span class="chip-count">{{ all_accounts|length }}</span>
+            </button>
+            <button type="button" class="filter-chip" data-filter="live">
+                <span class="chip-dot live"></span> Live <span class="chip-count">{{ live_accounts|length }}</span>
+            </button>
+            <button type="button" class="filter-chip" data-filter="backup">
+                <span class="chip-dot backup"></span> Backup <span class="chip-count">{{ all_accounts|length - live_accounts|length }}</span>
+            </button>
         </div>
     </div>
 
-    <!-- ── Live Accounts ── -->
+    <!-- Account Table -->
     <section class="block">
         <div class="block-header">
-            <h2>All Accounts <span class="count-badge">{{ all_accounts|length }}</span></h2>
+            <div class="block-header-left">
+                <h2>{{ icon_hash() }} Account Pool</h2>
+                <span class="count-badge">{{ all_accounts|length }}</span>
+            </div>
         </div>
         {% if all_accounts %}
         <div class="account-list">
             <div class="account-list-head">
                 <span></span>
-                <span>Name</span>
+                <span>Account</span>
                 <span>Phone</span>
-                <span>Session</span>
+                <span>Status</span>
+                <span>Mode</span>
                 <span></span>
             </div>
             {% set avatar_colors = ['av-blue', 'av-purple', 'av-green', 'av-orange', 'av-red', 'av-cyan'] %}
@@ -172,7 +278,9 @@
             {% set mode = account.get('mode', 'backup') %}
             <div class="account-row"
                  data-search-name="{{ account.get('name', '')|lower }}"
-                 data-search-phone="{{ account.get('phone', '')|lower }}">
+                 data-search-phone="{{ account.get('phone', '')|lower }}"
+                 data-mode="{{ mode }}"
+                 style="--row-delay: {{ loop.index0 * 30 }}ms">
                 <div class="account-avatar {{ avatar_colors[loop.index0 % 6] }}">
                     {{ (account.get('name', '?'))[0]|upper }}
                 </div>
@@ -181,27 +289,27 @@
                     {% if sub_names %}
                     <span class="sub-tag" title="Paid: {{ sub_names|join(', ') }}">{{ icon_star() }}</span>
                     {% endif %}
-                    <span class="mode-chip {{ mode }}">{{ mode }}</span>
                 </div>
                 <span class="row-phone">{{ account.get('phone', '-') }}</span>
                 <span class="session-badge {{ 'active' if has_session else 'inactive' }}">
                     <span class="session-dot"></span>
                     {{ 'Connected' if has_session else 'No session' }}
                 </span>
+                <span class="mode-chip {{ mode }}">{{ mode }}</span>
                 <button
                     type="button"
                     class="icon-btn view-account-btn"
-                    title="Edit account"
+                    title="View details"
                     data-mode="{{ mode }}"
                     data-title="{{ account.get('name', '#' + loop.index|string) }}"
-                    data-edit-url="{{ url_for('edit_account', index=loop.index0) }}"
-                    data-delete-url="{{ url_for('delete_account', index=loop.index0) }}"
+                    data-edit-url="{{ url_for('edit_account', account_id=account.get('_id', '')) }}"
+                    data-delete-url="{{ url_for('delete_account', account_id=account.get('_id', '')) }}"
                     data-name="{{ account.get('name', '') }}"
                     data-phone="{{ account.get('phone', '') }}"
                     data-password="{{ account.get('password') or '' }}"
                     data-session="{{ account.get('session_string', '') }}"
                     data-subscriptions='{{ account.get("paid_subscription", {})|tojson }}'>
-                    {{ icon_edit() }}
+                    {{ icon_chevron_right() }}
                 </button>
             </div>
             {% endfor %}
@@ -210,15 +318,35 @@
         {% else %}
         <div class="empty-state">
             <div class="empty-state-icon">{{ icon_inbox() }}</div>
-            <p>No accounts found.</p>
+            <p class="empty-state-title">No accounts yet</p>
+            <p class="empty-state-desc">Add your first Telegram account to get started.</p>
+            <button type="button" class="btn primary empty-state-cta" id="emptyAddBtn">
+                {{ icon_plus() }} New Account
+            </button>
         </div>
         {% endif %}
     </section>
 
-</div><!-- /.page-shell -->
+</div>
 
 
-<!-- ── Account Details Modal ── -->
+<!-- Confirm Dialog -->
+<div class="confirm-backdrop" id="confirmDialog" aria-hidden="true">
+    <div class="confirm-panel">
+        <div class="confirm-icon-wrap" id="confirmIconWrap">
+            {{ icon_trash() }}
+        </div>
+        <h3 id="confirmTitle">Are you sure?</h3>
+        <p id="confirmMessage">This action cannot be undone.</p>
+        <div class="confirm-actions">
+            <button type="button" class="btn tertiary" id="confirmCancel">Cancel</button>
+            <button type="button" class="btn danger" id="confirmOk">Confirm</button>
+        </div>
+    </div>
+</div>
+
+
+<!-- Account Details Modal -->
 <div class="modal-backdrop" id="accountDetailsModal" aria-hidden="true">
     <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="accountDetailsTitle">
         <div class="modal-header">
@@ -257,27 +385,45 @@
                 </div>
                 <div class="input-grid">
                     <label>
-                        Name
+                        <span class="field-label">{{ icon_user() }} Name</span>
                         <input type="text" name="name" id="detailsName" required placeholder="Account name">
                     </label>
                     <label>
-                        Phone
+                        <span class="field-label">{{ icon_smartphone() }} Phone</span>
                         <input type="text" name="phone" id="detailsPhone" required placeholder="+1 234 567 8900">
                     </label>
                     <label>
-                        Password
-                        <input type="text" name="password" id="detailsPassword" placeholder="Optional">
+                        <span class="field-label">{{ icon_key() }} Password</span>
+                        <input type="text" name="password" id="detailsPassword" placeholder="2FA password (optional)">
                     </label>
-                    <label>
-                        Session String
-                        <div class="secret-field">
-                            <input type="password" name="session_string" id="detailsSession" placeholder="Telethon session string" autocomplete="off" spellcheck="false">
-                            <button type="button" class="secret-toggle" aria-label="Toggle session visibility">
-                                <svg class="eye-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                                <svg class="eye-off-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                    <div class="session-gen-group">
+                        <span class="session-gen-label">{{ icon_shield() }} Session String</span>
+                        <div class="session-gen-row">
+                            <div class="secret-field">
+                                <input type="password" name="session_string" id="detailsSession" placeholder="Pyrogram session string" autocomplete="off" spellcheck="false">
+                                <button type="button" class="secret-toggle" aria-label="Toggle session visibility">
+                                    <svg class="eye-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                    <svg class="eye-off-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                                </button>
+                            </div>
+                            <button type="button" class="btn tertiary generate-session-btn" title="Generate session interactively">
+                                {{ icon_terminal() }} Generate
+                            </button>
+                            <button type="button" class="btn danger-outline revoke-session-btn" title="Revoke session and log out from Telegram" hidden>
+                                {{ icon_power() }} Revoke
                             </button>
                         </div>
-                    </label>
+                        <div class="session-terminal" hidden>
+                            <div class="terminal-output"></div>
+                            <div class="terminal-otp-row" hidden>
+                                <input type="text" class="terminal-otp-input" placeholder="Enter OTP code" maxlength="8" inputmode="numeric" pattern="\d*">
+                                <button type="button" class="btn primary terminal-otp-submit">Submit Code</button>
+                            </div>
+                            <div class="terminal-footer">
+                                <button type="button" class="btn tertiary terminal-cancel-btn">{{ icon_close() }} Cancel</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -293,21 +439,21 @@
             </div>
 
             <div class="actions">
-                <button class="btn primary" type="submit">Save Changes</button>
-                <button class="btn danger" type="submit" id="detailsDeleteBtn">Delete Account</button>
+                <button class="btn primary" type="submit">{{ icon_save() }} Save Changes</button>
+                <button class="btn danger" type="submit" id="detailsDeleteBtn">{{ icon_trash() }} Delete</button>
             </div>
         </form>
     </div>
 </div>
 
 
-<!-- ── Add Account Modal ── -->
+<!-- Add Account Modal -->
 <div class="modal-backdrop" id="addAccountModal" aria-hidden="true">
     <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="addAccountTitle">
         <div class="modal-header">
             <h2 id="addAccountTitle">
-                <div class="modal-header-icon">{{ icon_user_plus() }}</div>
-                Add Account
+                <div class="modal-header-icon add">{{ icon_user_plus() }}</div>
+                New Account
             </h2>
             <button type="button" class="btn ghost-close modal-close-btn" id="closeAddAccountModal" title="Close">
                 {{ icon_close() }}
@@ -340,27 +486,42 @@
                 </div>
                 <div class="input-grid">
                     <label>
-                        Name
+                        <span class="field-label">{{ icon_user() }} Name</span>
                         <input type="text" name="name" required placeholder="Account name">
                     </label>
                     <label>
-                        Phone
+                        <span class="field-label">{{ icon_smartphone() }} Phone</span>
                         <input type="text" name="phone" required placeholder="+1 234 567 8900">
                     </label>
                     <label>
-                        Password
-                        <input type="text" name="password" placeholder="Optional">
+                        <span class="field-label">{{ icon_key() }} Password</span>
+                        <input type="text" name="password" placeholder="2FA password (optional)">
                     </label>
-                    <label>
-                        Session String
-                        <div class="secret-field">
-                            <input type="password" name="session_string" placeholder="Telethon session string" autocomplete="off" spellcheck="false">
-                            <button type="button" class="secret-toggle" aria-label="Toggle session visibility">
-                                <svg class="eye-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                                <svg class="eye-off-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                    <div class="session-gen-group">
+                        <span class="session-gen-label">{{ icon_shield() }} Session String</span>
+                        <div class="session-gen-row">
+                            <div class="secret-field">
+                                <input type="password" name="session_string" placeholder="Pyrogram session string" autocomplete="off" spellcheck="false">
+                                <button type="button" class="secret-toggle" aria-label="Toggle session visibility">
+                                    <svg class="eye-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                    <svg class="eye-off-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                                </button>
+                            </div>
+                            <button type="button" class="btn tertiary generate-session-btn" title="Generate session interactively">
+                                {{ icon_terminal() }} Generate
                             </button>
                         </div>
-                    </label>
+                        <div class="session-terminal" hidden>
+                            <div class="terminal-output"></div>
+                            <div class="terminal-otp-row" hidden>
+                                <input type="text" class="terminal-otp-input" placeholder="Enter OTP code" maxlength="8" inputmode="numeric" pattern="\d*">
+                                <button type="button" class="btn primary terminal-otp-submit">Submit Code</button>
+                            </div>
+                            <div class="terminal-footer">
+                                <button type="button" class="btn tertiary terminal-cancel-btn">{{ icon_close() }} Cancel</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -377,7 +538,7 @@
             </div>
 
             <div class="actions">
-                <button class="btn primary" type="submit">Add Account</button>
+                <button class="btn primary" type="submit">{{ icon_plus() }} Add Account</button>
             </div>
         </form>
     </div>

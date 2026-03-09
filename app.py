@@ -7,18 +7,21 @@
 import os
 import re
 import json
+import time
+import uuid
 import asyncio
 import datetime
 import threading
 
 from pyrogram import Client
+from pyrogram.errors import SessionPasswordNeeded, PhoneCodeInvalid, PhoneCodeExpired
 from pyrogram.storage import MemoryStorage
-from flask import Flask, request, jsonify, render_template, redirect, url_for
+from flask import Flask, request, jsonify, render_template, redirect, url_for, Response, stream_with_context, flash
 
 from ai_helpers import get_groq_raw_response
 from consts import TelegramConfig
 from plugins import retry_extractor
-from session_manager import generate_missing_sessions
+import database as db
 
 import logging
 from logging.handlers import RotatingFileHandler
@@ -50,40 +53,45 @@ logger.addHandler(file_handler)
 logger.addHandler(console_handler)
 
 
-def startup_check():
-    # Reload from consts to ensure we have the latest data
+def _refresh_session_pool() -> None:
+    """Load live account session strings from MongoDB into TelegramConfig.SESSIONS."""
     from consts import TelegramConfig
-
-    if not TelegramConfig.SESSIONS:
-        logger.info("No valid session_string found in live_accounts.json. Starting automatic setup...")
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(generate_missing_sessions())
-    else:
-        logger.info(f"✅ {len(TelegramConfig.SESSIONS)} Sessions loaded from live_accounts.json.")
+    TelegramConfig.SESSIONS = db.get_live_session_strings()
 
 
-
-
-STATE_FILE = "bot_state.json"
-LIVE_ACCOUNTS_FILE = "live_accounts.json"
-BACKUP_PLAN_FILE = "backup_plan_accounts.json"
-ALL_ACCOUNTS_FILE = "all_accounts.json"
-ALL_ACCOUNTS_BACKUP_FILE = "all_accounts_backup.json"
-DEFAULT_SUBSCRIPTION_DATE = "2027-02-25"
-
-
-def load_accounts(file_path: str) -> list[dict]:
+def startup_check():
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return data if isinstance(data, list) else []
-    except (FileNotFoundError, json.JSONDecodeError):
-        return []
+        imported = db.migrate_from_json_if_empty()
+        if imported:
+            logger.info(f"One-time migration: imported {imported} accounts from JSON into MongoDB.")
+    except Exception as exc:
+        logger.warning(f"Could not run JSON migration: {exc}")
+
+    try:
+        _refresh_session_pool()
+        n = len(TelegramConfig.SESSIONS)
+        if n:
+            logger.info(f"{n} live session(s) loaded from MongoDB.")
+        else:
+            logger.warning(
+                "No live sessions found in MongoDB. "
+                "Add accounts with session strings via the dashboard."
+            )
+    except Exception as exc:
+        logger.error(f"Failed to load sessions from MongoDB: {exc}")
+
+    # Release any accounts stuck as under_use from a previous crash
+    try:
+        released = db.release_stale_accounts()
+        if released:
+            logger.info(f"Released {released} stale account(s) from previous run.")
+    except Exception as exc:
+        logger.warning(f"Could not release stale accounts: {exc}")
 
 
-def save_accounts(file_path: str, accounts: list[dict]) -> None:
-    with open(file_path, "w", encoding="utf-8") as f:
-        json.dump(accounts, f, indent=4, ensure_ascii=False)
+
+
+DEFAULT_SUBSCRIPTION_DATE = "2027-02-25"
 
 
 def normalize_paid_subscriptions(raw_value) -> dict[str, str]:
@@ -122,110 +130,6 @@ def normalize_paid_subscriptions(raw_value) -> dict[str, str]:
     return subscriptions
 
 
-def migrate_accounts_file(file_path: str) -> list[dict]:
-    accounts = load_accounts(file_path)
-    changed = False
-
-    for account in accounts:
-        current = account.get("paid_subscription")
-        normalized = normalize_paid_subscriptions(current)
-        if current != normalized:
-            account["paid_subscription"] = normalized
-            changed = True
-
-    if changed:
-        save_accounts(file_path, accounts)
-
-    return accounts
-
-
-def sync_account_files(all_accs: list[dict] | None = None) -> None:
-    """Rebuild all derived account files from all_accounts.json and refresh
-    the in-memory session pool.
-
-    File responsibilities:
-    - live_accounts.json        → accounts with mode == 'live'   (used by the bot)
-    - backup_plan_accounts.json → accounts with mode == 'backup' (standby pool)
-    - all_accounts_backup.json  → full safety copy of all_accounts.json
-    """
-    if all_accs is None:
-        all_accs = load_accounts(ALL_ACCOUNTS_FILE)
-
-    live_accs   = [acc for acc in all_accs if acc.get("mode") == "live"]
-    backup_accs = [acc for acc in all_accs if acc.get("mode") == "backup"]
-
-    save_accounts(LIVE_ACCOUNTS_FILE,     live_accs)
-    save_accounts(BACKUP_PLAN_FILE,       backup_accs)
-    save_accounts(ALL_ACCOUNTS_BACKUP_FILE, all_accs)   # safety copy
-
-    from consts import TelegramConfig
-    TelegramConfig.SESSIONS = [
-        acc["session_string"] for acc in live_accs if acc.get("session_string")
-    ]
-
-
-def ensure_unified_accounts() -> list[dict]:
-    """One-time-safe migration that makes all_accounts.json the single source of
-    truth, then returns the up-to-date list.
-
-    What it does:
-    1. Merges accounts present only in live_accounts.json or backup_plan_accounts.json
-       into all_accounts.json with the correct mode stamp.
-    2. Stamps a ``mode`` field ('live' | 'backup') on any account that lacks one,
-       using live_accounts.json / backup_plan_accounts.json as the hint.
-    3. Normalises ``paid_subscription`` on every account.
-    """
-    all_accs    = load_accounts(ALL_ACCOUNTS_FILE)
-    live_accs   = load_accounts(LIVE_ACCOUNTS_FILE)
-    backup_accs = load_accounts(BACKUP_PLAN_FILE)
-
-    live_phones   = {acc.get("phone") for acc in live_accs   if acc.get("phone")}
-    backup_phones = {acc.get("phone") for acc in backup_accs if acc.get("phone")}
-    all_phones    = {acc.get("phone") for acc in all_accs    if acc.get("phone")}
-
-    changed = False
-
-    # 1a. Pull in accounts that exist only in live_accounts.json
-    for acc in live_accs:
-        phone = acc.get("phone")
-        if phone and phone not in all_phones:
-            entry = dict(acc)
-            entry["mode"] = "live"
-            all_accs.append(entry)
-            all_phones.add(phone)
-            changed = True
-
-    # 1b. Pull in accounts that exist only in backup_plan_accounts.json
-    for acc in backup_accs:
-        phone = acc.get("phone")
-        if phone and phone not in all_phones:
-            entry = dict(acc)
-            entry["mode"] = "backup"
-            all_accs.append(entry)
-            all_phones.add(phone)
-            changed = True
-
-    # 2 & 3. Stamp mode + normalise subscriptions
-    for acc in all_accs:
-        if "mode" not in acc:
-            phone = acc.get("phone")
-            if phone in live_phones:
-                acc["mode"] = "live"
-            elif phone in backup_phones:
-                acc["mode"] = "backup"
-            else:
-                acc["mode"] = "backup"
-            changed = True
-        current = acc.get("paid_subscription")
-        normalised = normalize_paid_subscriptions(current)
-        if current != normalised:
-            acc["paid_subscription"] = normalised
-            changed = True
-
-    if changed:
-        save_accounts(ALL_ACCOUNTS_FILE, all_accs)
-
-    return all_accs
 
 
 def account_from_form(form) -> tuple[dict | None, str | None]:
@@ -276,51 +180,282 @@ def account_from_form(form) -> tuple[dict | None, str | None]:
     return account, None
 
 
-def get_bot_state():
+
+# ── Interactive session generation ─────────────────────────────────────────
+
+_session_jobs: dict[str, "SessionJob"] = {}
+
+
+class SessionJob:
+    def __init__(self, job_id: str, phone: str, name: str, password: str | None):
+        self.job_id = job_id
+        self.phone = phone
+        self.name = name
+        self.password = password
+        self.logs: list[str] = []
+        self.otp_event = threading.Event()
+        self.cancel_event = threading.Event()
+        self.otp_value: str | None = None
+        self.otp_requests: int = 0   # increments every time OTP is needed (incl. retries)
+        self.result: str | None = None
+        self.error: str | None = None
+        # status: 'running' | 'waiting_otp' | 'processing' | 'cancelled' | 'done' | 'error'
+        self.status = "running"
+
+    def log(self, msg: str) -> None:
+        self.logs.append(msg)
+
+
+def run_session_generation(job: SessionJob) -> None:
+    """Runs in a dedicated thread with its own asyncio event loop."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     try:
-        with open(STATE_FILE, "r") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {"active_index": 0, "last_switch_time": None, "switch_history": []}
+        loop.run_until_complete(_generate_session_async(job))
+    finally:
+        loop.close()
 
 
-def switch_bot(target_index=None):
-    state = get_bot_state()
-    # Safely default to 0 if active_index isn't found
-    old_index = state.get("active_index", 0)
+async def _generate_session_async(job: SessionJob) -> None:
+    client = Client(
+        name=job.name or job.phone,
+        api_id=TelegramConfig.API_ID,
+        api_hash=TelegramConfig.API_HASH,
+        in_memory=True,
+    )
 
-    # Dynamically determine the total number of Pyrogram sessions available
-    from consts import TelegramConfig
-    total_sessions = len(TelegramConfig.SESSIONS)
+    async def wait_for_otp() -> bool:
+        """Wait for OTP or cancel. Returns True if OTP received, False if cancelled/timed out."""
+        deadline = time.time() + 180
+        while time.time() < deadline:
+            if job.cancel_event.is_set():
+                return False
+            if job.otp_event.is_set():
+                return True
+            await asyncio.sleep(0.3)
+        return False
 
-    if target_index is not None:
-        new_index = int(target_index)
-    else:
-        # Cycle through all available indexes: 0 -> 1 -> 2 -> 0 -> 1 ...
-        new_index = (old_index + 1) % total_sessions
+    try:
+        job.log("Connecting to Telegram…")
+        await client.connect()
 
-    now = datetime.datetime.now().isoformat()
-    state["active_index"] = new_index
-    state["last_switch_time"] = now
+        job.log(f"Sending verification code to {job.phone}…")
+        sent_code = await client.send_code(job.phone)
+        job.log("Code sent. Enter the OTP below.")
 
-    # Ensure switch_history key exists to prevent KeyError
-    if "switch_history" not in state:
-        state["switch_history"] = []
+        signed_in = False
+        while not signed_in:
+            # Signal the UI to show the OTP input
+            job.otp_requests += 1
+            job.status = "waiting_otp"
 
-    state["switch_history"].append({
-        "from_bot": old_index,
-        "to_bot": new_index,
-        "timestamp": now
-    })
+            got = await wait_for_otp()
 
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f, indent=4)
+            if not got:
+                if job.cancel_event.is_set():
+                    job.log("Cancelled.")
+                    job.status = "cancelled"
+                else:
+                    job.log("Timed out waiting for OTP (3 min limit).")
+                    job.status = "error"
+                    job.error = "OTP timeout"
+                return
 
-    logger.warning(f"🔄 SWITCH TRIGGERED: Bot {old_index} -> Bot {new_index}")
-    return new_index
+            otp = job.otp_value
+            job.otp_event.clear()
+            job.otp_value = None
+            job.status = "processing"
+            job.log("Signing in…")
+
+            try:
+                await client.sign_in(
+                    phone_number=job.phone,
+                    phone_code_hash=sent_code.phone_code_hash,
+                    phone_code=otp,
+                )
+                signed_in = True
+
+            except PhoneCodeInvalid:
+                job.log("Incorrect code — please try again.")
+
+            except PhoneCodeExpired:
+                job.log("Code expired. Requesting a new code…")
+                sent_code = await client.send_code(job.phone)
+                job.log("New code sent.")
+
+            except SessionPasswordNeeded:
+                if not job.password:
+                    raise Exception("2FA is enabled but no password was provided.")
+                job.log("Two-factor authentication required. Verifying password…")
+                await client.check_password(job.password)
+                job.log("2FA verified.")
+                signed_in = True
+
+        session_string = await client.export_session_string()
+        job.log("Session string exported successfully.")
+        job.result = session_string
+        job.status = "done"
+
+    except Exception as exc:
+        job.log(f"Error: {exc}")
+        job.error = str(exc)
+        job.status = "error"
+    finally:
+        if client.is_connected:
+            await client.disconnect()
 
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", os.urandom(32))
+
+
+# ── Session generation routes ───────────────────────────────────────────────
+
+@app.route("/accounts/session/start", methods=["POST"])
+def start_session_generation():
+    phone    = (request.form.get("phone")    or "").strip()
+    name     = (request.form.get("name")     or "").strip()
+    password = (request.form.get("password") or "").strip() or None
+
+    if not phone:
+        return jsonify({"error": "Phone is required"}), 400
+
+    job_id = str(uuid.uuid4())
+    job = SessionJob(job_id, phone, name, password)
+    _session_jobs[job_id] = job
+
+    threading.Thread(target=run_session_generation, args=(job,), daemon=True).start()
+    return jsonify({"job_id": job_id})
+
+
+@app.route("/accounts/session/stream/<job_id>")
+def session_stream(job_id: str):
+    def generate():
+        job = _session_jobs.get(job_id)
+        if not job:
+            yield f"data: {json.dumps({'type': 'error', 'msg': 'Job not found'})}\n\n"
+            return
+
+        sent_idx = 0
+        last_otp_request = 0  # tracks which OTP request we've already prompted for
+
+        def flush_logs():
+            nonlocal sent_idx
+            while sent_idx < len(job.logs):
+                yield f"data: {json.dumps({'type': 'log', 'msg': job.logs[sent_idx]})}\n\n"
+                sent_idx += 1
+
+        while True:
+            yield from flush_logs()
+
+            # Prompt for OTP whenever the backend increments otp_requests (incl. retries)
+            if job.otp_requests > last_otp_request:
+                yield f"data: {json.dumps({'type': 'waiting_otp'})}\n\n"
+                last_otp_request = job.otp_requests
+
+            if job.status == "done":
+                yield from flush_logs()
+                yield f"data: {json.dumps({'type': 'done', 'session': job.result})}\n\n"
+                return
+
+            if job.status in ("error", "cancelled"):
+                yield from flush_logs()
+                yield f"data: {json.dumps({'type': job.status, 'msg': job.error or ''})}\n\n"
+                return
+
+            time.sleep(0.3)
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.route("/accounts/session/otp", methods=["POST"])
+def submit_session_otp():
+    job_id = (request.form.get("job_id") or "").strip()
+    otp    = (request.form.get("otp")    or "").strip()
+
+    job = _session_jobs.get(job_id)
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+
+    job.otp_value = otp
+    job.otp_event.set()
+    return jsonify({"status": "ok"})
+
+
+@app.route("/accounts/session/cancel", methods=["POST"])
+def cancel_session():
+    job_id = (request.form.get("job_id") or "").strip()
+    job = _session_jobs.get(job_id)
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+
+    job.cancel_event.set()
+    return jsonify({"status": "ok"})
+
+
+@app.route("/accounts/session/revoke", methods=["POST"])
+def revoke_session():
+    """Log out from Telegram using the stored session string, then clear it in MongoDB."""
+    phone = (request.form.get("phone") or "").strip()
+    if not phone:
+        return jsonify({"error": "Phone is required"}), 400
+
+    # Look up the account
+    accounts = db.get_all_accounts()
+    account = next((a for a in accounts if a.get("phone") == phone), None)
+    if not account:
+        return jsonify({"error": "Account not found"}), 404
+
+    session_string = account.get("session_string")
+    if not session_string:
+        return jsonify({"error": "No session string to revoke"}), 400
+
+    def do_revoke():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(_revoke_session_async(session_string))
+        finally:
+            loop.close()
+
+    try:
+        result = do_revoke()
+    except Exception as exc:
+        logger.error(f"Session revoke failed for {phone}: {exc}")
+        return jsonify({"error": f"Revoke failed: {exc}"}), 500
+
+    # Clear session_string in MongoDB regardless of log_out result
+    db.update_session_string(phone, "")
+    _refresh_session_pool()
+    logger.info(f"Session revoked and cleared for {phone}")
+
+    return jsonify({"status": "ok", "detail": result})
+
+
+async def _revoke_session_async(session_string: str) -> str:
+    client = Client(
+        name="revoke_temp",
+        api_id=TelegramConfig.API_ID,
+        api_hash=TelegramConfig.API_HASH,
+        session_string=session_string,
+        in_memory=True,
+        no_updates=True,
+    )
+    try:
+        await client.start()
+        await client.log_out()
+        return "Logged out from Telegram successfully"
+    except Exception as exc:
+        # Even if log_out fails (e.g. session already invalid), we still clear it
+        logger.warning(f"log_out call failed: {exc}")
+        return f"Session cleared locally (Telegram log_out failed: {exc})"
+    finally:
+        if client.is_connected:
+            await client.disconnect()
 
 
 # Define your parsing function
@@ -406,16 +541,16 @@ def home():
 
 @app.route('/accounts/dashboard', methods=['GET'])
 def accounts_dashboard():
-    all_accounts = ensure_unified_accounts()
-    sync_account_files(all_accounts)
+    from flask import get_flashed_messages
+    all_accounts  = db.get_all_accounts()
     live_accounts = [acc for acc in all_accounts if acc.get("mode") == "live"]
+    flashes = get_flashed_messages(with_categories=True)
     return render_template(
         "accounts_dashboard.html",
         all_accounts=all_accounts,
         live_accounts=live_accounts,
         default_subscription_date=DEFAULT_SUBSCRIPTION_DATE,
-        message=request.args.get("message"),
-        error=request.args.get("error"),
+        flashes=flashes,
     )
 
 
@@ -423,44 +558,44 @@ def accounts_dashboard():
 def add_account():
     account, error = account_from_form(request.form)
     if error:
-        return redirect(url_for("accounts_dashboard", error=error))
+        flash(error, "error")
+        return redirect(url_for("accounts_dashboard"))
 
-    all_accs = load_accounts(ALL_ACCOUNTS_FILE)
-    all_accs.append(account)
-    save_accounts(ALL_ACCOUNTS_FILE, all_accs)
-    sync_account_files(all_accs)
-
-    return redirect(url_for("accounts_dashboard", message="Account added successfully."))
+    db.insert_account(account)
+    _refresh_session_pool()
+    flash("Account added successfully.", "success")
+    return redirect(url_for("accounts_dashboard"))
 
 
-@app.route('/accounts/edit/<int:index>', methods=['POST'])
-def edit_account(index: int):
-    all_accs = load_accounts(ALL_ACCOUNTS_FILE)
-    if index < 0 or index >= len(all_accs):
-        return redirect(url_for("accounts_dashboard", error="Invalid account index."))
-
+@app.route('/accounts/edit/<account_id>', methods=['POST'])
+def edit_account(account_id: str):
     account, error = account_from_form(request.form)
     if error:
-        return redirect(url_for("accounts_dashboard", error=error))
+        flash(error, "error")
+        return redirect(url_for("accounts_dashboard"))
 
-    all_accs[index] = account
-    save_accounts(ALL_ACCOUNTS_FILE, all_accs)
-    sync_account_files(all_accs)
+    try:
+        db.replace_account(account_id, account)
+    except Exception:
+        flash("Account not found.", "error")
+        return redirect(url_for("accounts_dashboard"))
 
-    return redirect(url_for("accounts_dashboard", message="Account updated successfully."))
+    _refresh_session_pool()
+    flash("Account updated successfully.", "success")
+    return redirect(url_for("accounts_dashboard"))
 
 
-@app.route('/accounts/delete/<int:index>', methods=['POST'])
-def delete_account(index: int):
-    all_accs = load_accounts(ALL_ACCOUNTS_FILE)
-    if index < 0 or index >= len(all_accs):
-        return redirect(url_for("accounts_dashboard", error="Invalid account index."))
+@app.route('/accounts/delete/<account_id>', methods=['POST'])
+def delete_account(account_id: str):
+    try:
+        db.delete_account(account_id)
+    except Exception:
+        flash("Account not found.", "error")
+        return redirect(url_for("accounts_dashboard"))
 
-    all_accs.pop(index)
-    save_accounts(ALL_ACCOUNTS_FILE, all_accs)
-    sync_account_files(all_accs)
-
-    return redirect(url_for("accounts_dashboard", message="Account deleted successfully."))
+    _refresh_session_pool()
+    flash("Account deleted successfully.", "success")
+    return redirect(url_for("accounts_dashboard"))
 
 
 ENCRYPT_BOTS: dict[str: str]= {
@@ -469,17 +604,10 @@ ENCRYPT_BOTS: dict[str: str]= {
     'AML': 'ASocialMediaLeaksBot ', # Monthly fee (paid)
 }
 
-# Threading lock — only one request is served at a time.
-# Any concurrent request gets an immediate "busy" response; no queuing, no waiting.
-_bot_lock = threading.Lock()
-
-
-# Flask route to handle GET requests
-# app.py
 
 @app.route('/search_phone', methods=['GET'])
 async def search_phone():
-    # 1. Validate inputs BEFORE acquiring the lock so bad requests fail fast
+    # 1. Validate inputs
     message_text = request.args.get("input", "")
     source = request.args.get("source", "")
 
@@ -492,25 +620,25 @@ async def search_phone():
     if not bot_username:
         return jsonify({"error": "Invalid bot source provided."}), 400
 
-    # 2. Try to acquire the lock without blocking — if already taken, respond busy immediately
-    if not _bot_lock.acquire(blocking=False):
-        logger.info(f"Bot busy — rejecting request for '{message_text}' immediately.")
+    # 2. Acquire an available account from the DB
+    account = db.acquire_account()
+    if not account:
+        logger.info(f"All accounts busy — rejecting request for '{message_text}'.")
         return jsonify({
             "status": "busy",
-            "message": "The bot is currently processing another request. Please try again in a few seconds."
+            "message": "All accounts are currently in use. Please try again in a few seconds."
         }), 503
 
-    state = get_bot_state()
-    current_session = TelegramConfig.SESSIONS[state["active_index"]]
+    account_phone = account["_id"]
+    current_session = account["session_string"]
+    account_name = account.get("name", account_phone)
 
     # 3. Initialize Bot
     tg_bot = None
 
     try:
-
-        # Initialize Client with Memory Storage (Fixes "Database Locked")
         tg_bot = Client(
-            name=f"bot_instance_{state['active_index']}",
+            name=f"bot_{account_phone}",
             api_id=TelegramConfig.API_ID,
             api_hash=TelegramConfig.API_HASH,
             session_string=current_session,
@@ -519,7 +647,7 @@ async def search_phone():
         )
 
         await tg_bot.start()
-        logger.info(f"🚀 Starting search: {message_text} via @{bot_username}")
+        logger.info(f"Search: {message_text} via @{bot_username} (account: {account_name})")
 
         # 4. Send Message
         sent = await tg_bot.send_message(bot_username, message_text)
@@ -530,21 +658,17 @@ async def search_phone():
         found_reply = None
 
         while asyncio.get_event_loop().time() < deadline:
-            # Check last 10 messages for a new reply
             async for msg in tg_bot.get_chat_history(bot_username, limit=10):
-                # Ignore old messages (older than our sent message)
-
-
-                if msg.id <= sent.id: continue
+                if msg.id <= sent.id:
+                    continue
 
                 text = msg.text.lower() if msg.text else ""
 
                 if "too many requests" in text or "tokens recover" in text or 'too frequent requests' in text:
-                    logger.error(f"❌ Rate limit hit on account index {state['active_index']}")
-                    switch_bot()
+                    logger.warning(f"Rate limit hit on account {account_name} ({account_phone})")
                     return jsonify({
-                        "status": "switched",
-                        "message": "Primary bot limit reached. Switching to secondary. Please retry your request."
+                        "status": "rate_limited",
+                        "message": "This account hit a rate limit. Please retry — another account will be used."
                     }), 429
 
                 # Validation: Must be from the bot we messaged
@@ -556,10 +680,6 @@ async def search_phone():
                 # Ignore "Processing" status messages
                 if 'the number of leaks' in text and 'number of results' in text:
                     continue
-
-                # Handle Rate Limits
-                if 'too frequent requests' in text:
-                    return jsonify({"error": "Too many requests sent to the bot. Please try again later."}), 429
 
                 found_reply = msg
                 break
@@ -581,8 +701,8 @@ async def search_phone():
             if found_reply.reply_markup and len(found_reply.reply_markup.inline_keyboard) >= 2:
                 try:
                     page_text = found_reply.reply_markup.inline_keyboard[0][1].text
-                    reported_total = int(page_text.split('\\')[-1])  # Handles "1\9" format
-                    total_pages = min(reported_total, 5)  # Cap at 5 pages
+                    reported_total = int(page_text.split('\\')[-1])
+                    total_pages = min(reported_total, 5)
                 except (IndexError, ValueError):
                     total_pages = 1
 
@@ -591,7 +711,6 @@ async def search_phone():
                 logger.info(f"Processing page {current_page_idx + 1}/{total_pages} for {message_text}")
 
                 try:
-                    # Extract Data using Groq/Regex
                     page_data = retry_extractor(get_groq_raw_response, found_reply.text, attempts=4)
 
                     if isinstance(page_data, list):
@@ -599,12 +718,9 @@ async def search_phone():
                     elif isinstance(page_data, dict):
                         all_extracted_records.append(page_data)
 
-                    # Navigate to Next Page
                     if current_page_idx < total_pages - 1:
-                        await found_reply.click(2, 0)  # Click "Next"
-                        await asyncio.sleep(1.5)  # Wait for edit
-
-                        # Refresh message object
+                        await found_reply.click(2, 0)
+                        await asyncio.sleep(1.5)
                         found_reply = await tg_bot.get_messages(chat_id=bot_username, message_ids=found_reply.id)
 
                 except Exception as e:
@@ -617,95 +733,75 @@ async def search_phone():
             return jsonify({"error": "No reply received from bot within timeout period."}), 504
 
     except Exception as e:
-        logger.exception("🔥 Critical error in search_phone route")
+        logger.exception(f"Critical error in search_phone (account: {account_name})")
         return jsonify({"error": str(e)}), 500
 
     finally:
-        # 7. Safe Cleanup
         if tg_bot and tg_bot.is_connected:
             await tg_bot.stop()
 
-        logger.info("Bot lock released.")
-        _bot_lock.release()
+        db.release_account(account_phone)
+        logger.info(f"Account {account_name} released.")
 
 
 @app.route('/fix', methods=['GET'])
 def fix_bot():
     """
-    Forcibly releases the bot lock if it is currently held (e.g. after a crash).
-    Safe to call at any time — returns whether the lock was actually released.
+    Release all accounts stuck as under_use (e.g. after a crash).
+    Safe to call at any time.
     """
-    if _bot_lock.locked():
-        _bot_lock.release()
-        logger.warning("Bot lock forcibly released via /fix endpoint.")
-        return jsonify({
-            "status": "success",
-            "message": "Bot lock was held and has been forcibly released."
-        })
+    released = db.release_stale_accounts()
+    busy = db.get_busy_accounts()
+
+    if released > 0:
+        logger.warning(f"Force-released {released} stale account(s) via /fix endpoint.")
 
     return jsonify({
         "status": "success",
-        "message": "Bot was not locked — nothing to release."
+        "released_stale": released,
+        "still_busy": [{"phone": a["_id"], "name": a.get("name", ""), "last_used": str(a.get("last_used", ""))} for a in busy],
     })
 
 
 @app.route('/bots_info', methods=['GET'])
 def bots_info():
     """
-    Returns details about the active Pyrogram session (sender)
-    and the available target bots (receivers).
+    Returns status of all live accounts and the target bots.
     """
-    state = get_bot_state()
-    total_sessions = len(TelegramConfig.SESSIONS)
+    live_accounts = db.get_accounts_by_mode("live")
+    busy_count = sum(1 for a in live_accounts if a.get("under_use"))
+    with_session = [a for a in live_accounts if a.get("session_string")]
 
     return jsonify({
-        "client_sessions": {
-            "active_index": state["active_index"],
-            "total_available": total_sessions,
-            "last_switch_time": state.get("last_switch_time"),
-            "switch_history_count": len(state.get("switch_history", []))
+        "accounts": {
+            "total_live": len(live_accounts),
+            "with_session": len(with_session),
+            "currently_busy": busy_count,
+            "available": len(with_session) - busy_count,
+            "busy_details": [
+                {
+                    "phone": a["_id"],
+                    "name": a.get("name", ""),
+                    "last_used": str(a.get("last_used", "")),
+                }
+                for a in live_accounts if a.get("under_use")
+            ],
         },
-        "target_bots_available": ENCRYPT_BOTS,
-        "system_status": {
-            "is_processing_request": _bot_lock.locked()
-        }
+        "target_bots": ENCRYPT_BOTS,
     })
 
 
 @app.route('/switch_session', methods=['GET'])
 def switch_session():
     """
-    Switches the active Pyrogram session.
-    Pass ?index=X to switch to a specific session index.
-    If no index is passed, it toggles to the next one automatically.
+    Legacy endpoint kept for compatibility.
+    With DB-based account acquisition, session switching is automatic.
     """
-    # Prevent switching if the bot is currently in the middle of a request
-    if _bot_lock.locked():
-        return jsonify({
-            "error": "Cannot switch sessions while the bot is actively processing a search."
-        }), 409
-
-    target = request.args.get('index')
-    total_sessions = len(TelegramConfig.SESSIONS)
-
-    try:
-        if target is not None:
-            target_idx = int(target)
-            if target_idx < 0 or target_idx >= total_sessions:
-                return jsonify({
-                    "error": f"Invalid index. Must be between 0 and {total_sessions - 1}"
-                }), 400
-            new_index = switch_bot(target_index=target_idx)
-        else:
-            new_index = switch_bot()  # Default toggle behavior
-
-        return jsonify({
-            "status": "success",
-            "message": f"Successfully switched to client session index {new_index}",
-            "active_index": new_index
-        })
-    except ValueError:
-        return jsonify({"error": "Index parameter must be a valid integer."}), 400
+    return jsonify({
+        "status": "info",
+        "message": "Session switching is now automatic. "
+                   "Accounts are acquired on demand and released after each request.",
+    })
 
 
 if __name__ == "__main__":

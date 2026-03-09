@@ -3,28 +3,18 @@
 # Contact Us: https://terabyte-26.com/quick-links/
 # Telegram: @hamza_farahat or https://t.me/hamza_farahat
 # WhatsApp: +212772177012
-import json
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
-
-def load_sessions_from_json() -> list[str]:
-    """Reads live_accounts.json and returns a list of valid session strings."""
-    try:
-        with open('live_accounts.json', 'r') as f:
-            accounts = json.load(f)
-            # Filter out any accounts that don't have a session_string yet
-            return [acc['session_string'] for acc in accounts if acc.get('session_string')]
-    except (FileNotFoundError, json.JSONDecodeError):
-        return []
 
 
 class TelegramConfig(object):
     API_ID: int = int(os.getenv("API_ID"))
     API_HASH: str = os.getenv("API_HASH")
     PHONE_NUMBER: str = os.getenv("PHONE_NUMBER")
-    SESSIONS: list[str] = load_sessions_from_json()
+    # Populated at startup from MongoDB via app._refresh_session_pool()
+    SESSIONS: list[str] = []
 
 
 class API_KEYS(object):
