@@ -18,6 +18,8 @@ class TelegramConfig(object):
 
 
 class API_KEYS(object):
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY")
     GROQ_API_KEY_1: str = os.getenv("GROQ_API_KEY_1")  # blackmorelouise01@gmail.com
     GROQ_API_KEY_2: str = os.getenv("GROQ_API_KEY_2")  # farahat.hamza199@gmail.com
@@ -38,8 +40,10 @@ class API_KEYS(object):
 
 
 class Models(object):
+    class Gemini(object):
+        FLASH_2_0: str = "gemini-2.0-flash"
+
     class Groq(object):
-        # Google models
         LLAMA_3_3_70: str = "llama-3.3-70b-versatile"
         LLAMA_3_1_8: str = "llama-3.1-8b-instant"
 

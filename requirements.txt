@@ -3,6 +3,7 @@ asgiref
 certifi
 dnspython
 flask
+google-genai
 groq
 gunicorn
 pip-chill
