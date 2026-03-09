@@ -620,13 +620,13 @@ async def search_phone():
     if not bot_username:
         return jsonify({"error": "Invalid bot source provided."}), 400
 
-    # 2. Acquire an available account from the DB
-    account = db.acquire_account()
+    # 2. Acquire an available account that has a subscription for this bot
+    account = db.acquire_account(bot_source=source.lower())
     if not account:
-        logger.info(f"All accounts busy — rejecting request for '{message_text}'.")
+        logger.info(f"No available account with {source.upper()} subscription for '{message_text}'.")
         return jsonify({
             "status": "busy",
-            "message": "All accounts are currently in use. Please try again in a few seconds."
+            "message": f"No available account with {source.upper()} subscription. All are busy or none configured."
         }), 503
 
     account_phone = account["_id"]
