@@ -18,6 +18,7 @@ from pyrogram.errors import SessionPasswordNeeded, PhoneCodeInvalid, PhoneCodeEx
 from pyrogram.storage import MemoryStorage
 from flask import Flask, request, jsonify, render_template, redirect, url_for, Response, stream_with_context, flash
 
+from groq import RateLimitError
 from ai_helpers import get_groq_raw_response
 from consts import TelegramConfig
 from plugins import retry_extractor
@@ -723,6 +724,13 @@ async def search_phone():
                         await asyncio.sleep(1.5)
                         found_reply = await tg_bot.get_messages(chat_id=bot_username, message_ids=found_reply.id)
 
+                except RateLimitError as e:
+                    logger.warning(f"Groq API rate limit hit: {e}")
+                    return jsonify({
+                        "status": "groq_rate_limited",
+                        "message": "AI extraction service is temporarily rate-limited. Please try again in a few minutes."
+                    }), 429
+
                 except Exception as e:
                     logger.exception(f"Error processing page {current_page_idx + 1}")
                     break
@@ -731,6 +739,13 @@ async def search_phone():
 
         else:
             return jsonify({"error": "No reply received from bot within timeout period."}), 504
+
+    except RateLimitError as e:
+        logger.warning(f"Groq API rate limit hit: {e}")
+        return jsonify({
+            "status": "groq_rate_limited",
+            "message": "AI extraction service is temporarily rate-limited. Please try again in a few minutes."
+        }), 429
 
     except Exception as e:
         logger.exception(f"Critical error in search_phone (account: {account_name})")
