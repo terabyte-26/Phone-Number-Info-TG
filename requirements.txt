@@ -2,7 +2,7 @@ aiohttp
 asgiref
 certifi
 dnspython
-flask
+flask[async]
 google-genai
 groq
 gunicorn

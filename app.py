@@ -19,7 +19,7 @@ from pyrogram.storage import MemoryStorage
 from flask import Flask, request, jsonify, render_template, redirect, url_for, Response, stream_with_context, flash
 
 from groq import RateLimitError
-from ai_helpers import get_groq_raw_response
+from ai_helpers import get_groq_raw_response, check_key_usage
 from consts import TelegramConfig
 from plugins import retry_extractor
 import database as db
@@ -67,6 +67,13 @@ def startup_check():
             logger.info(f"One-time migration: imported {imported} accounts from JSON into MongoDB.")
     except Exception as exc:
         logger.warning(f"Could not run JSON migration: {exc}")
+
+    try:
+        imported = db.migrate_api_keys_from_env()
+        if imported:
+            logger.info(f"One-time migration: imported {imported} API keys from .env into MongoDB.")
+    except Exception as exc:
+        logger.warning(f"Could not run API key migration: {exc}")
 
     try:
         _refresh_session_pool()
@@ -597,6 +604,109 @@ def delete_account(account_id: str):
     _refresh_session_pool()
     flash("Account deleted successfully.", "success")
     return redirect(url_for("accounts_dashboard"))
+
+
+# ── API Keys Dashboard ────────────────────────────────────────────────────────
+
+@app.route('/api-keys/dashboard', methods=['GET'])
+def api_keys_dashboard():
+    from flask import get_flashed_messages
+    all_keys = db.get_all_api_keys()
+    gemini_keys = [k for k in all_keys if k["provider"] == "gemini"]
+    groq_keys = [k for k in all_keys if k["provider"] == "groq"]
+    enabled_keys = [k for k in all_keys if k.get("enabled", True)]
+    flashes = get_flashed_messages(with_categories=True)
+    return render_template(
+        "api_keys_dashboard.html",
+        all_keys=all_keys,
+        gemini_keys=gemini_keys,
+        groq_keys=groq_keys,
+        enabled_keys=enabled_keys,
+        flashes=flashes,
+    )
+
+
+@app.route('/api-keys/add', methods=['POST'])
+def add_api_key():
+    provider = request.form.get("provider", "").strip().lower()
+    label = request.form.get("label", "").strip()
+    key = request.form.get("key", "").strip()
+
+    if provider not in ("groq", "gemini"):
+        flash("Invalid provider.", "error")
+        return redirect(url_for("api_keys_dashboard"))
+    if not key:
+        flash("API key is required.", "error")
+        return redirect(url_for("api_keys_dashboard"))
+
+    db.insert_api_key({"provider": provider, "label": label, "key": key, "enabled": True})
+    flash(f"{provider.capitalize()} key added successfully.", "success")
+    return redirect(url_for("api_keys_dashboard"))
+
+
+@app.route('/api-keys/edit/<key_id>', methods=['POST'])
+def edit_api_key(key_id: str):
+    provider = request.form.get("provider", "").strip().lower()
+    label = request.form.get("label", "").strip()
+    key = request.form.get("key", "").strip()
+
+    if provider not in ("groq", "gemini"):
+        flash("Invalid provider.", "error")
+        return redirect(url_for("api_keys_dashboard"))
+    if not key:
+        flash("API key is required.", "error")
+        return redirect(url_for("api_keys_dashboard"))
+
+    db.update_api_key(key_id, {"provider": provider, "label": label, "key": key})
+    flash("API key updated successfully.", "success")
+    return redirect(url_for("api_keys_dashboard"))
+
+
+@app.route('/api-keys/delete/<key_id>', methods=['POST'])
+def delete_api_key(key_id: str):
+    db.delete_api_key(key_id)
+    flash("API key deleted.", "success")
+    return redirect(url_for("api_keys_dashboard"))
+
+
+@app.route('/api-keys/toggle/<key_id>', methods=['POST'])
+def toggle_api_key(key_id: str):
+    new_enabled = db.toggle_api_key(key_id)
+    return jsonify({"status": "ok", "enabled": new_enabled})
+
+
+@app.route('/api-keys/usage', methods=['GET'])
+def api_keys_usage():
+    """Stream live usage/quota checks in parallel via SSE."""
+    import json as _json
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from queue import Queue
+
+    def check_one(k):
+        usage = check_key_usage(k["provider"], k["key"])
+        usage["id"] = str(k["_id"])
+        usage["provider"] = k["provider"]
+        usage["label"] = k.get("label", "")
+        return usage
+
+    def generate():
+        keys = db.get_all_api_keys()
+        with ThreadPoolExecutor(max_workers=min(len(keys), 10)) as pool:
+            futures = {pool.submit(check_one, k): k for k in keys}
+            for future in as_completed(futures):
+                try:
+                    result = future.result()
+                except Exception as e:
+                    k = futures[future]
+                    result = {"id": str(k["_id"]), "provider": k["provider"], "status": "error", "error": str(e)}
+                yield f"data: {_json.dumps(result)}\n\n"
+        yield "data: {\"done\": true}\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 ENCRYPT_BOTS: dict[str: str]= {

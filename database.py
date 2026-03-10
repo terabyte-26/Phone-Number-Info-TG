@@ -217,6 +217,157 @@ def save_bot_state(state: dict) -> None:
     )
 
 
+# ── API Keys ─────────────────────────────────────────────────────────────────
+
+def get_all_api_keys() -> list[dict]:
+    """Return all API key documents, sorted by provider then label."""
+    return list(_col("api_keys").find().sort([("provider", 1), ("label", 1)]))
+
+
+def get_enabled_api_keys(provider: str) -> list[dict]:
+    """Return enabled key documents for a provider (groq or gemini)."""
+    return list(_col("api_keys").find({
+        "provider": provider.lower(),
+        "enabled": True,
+    }).sort("last_used", 1))
+
+
+def insert_api_key(data: dict) -> str:
+    """Insert a new API key. Returns the inserted _id as string."""
+    from bson import ObjectId
+    doc = {
+        "provider": data["provider"].lower(),
+        "label": data.get("label", "").strip(),
+        "key": data["key"].strip(),
+        "enabled": data.get("enabled", True),
+        "added_date": _now(),
+        "last_used": None,
+        "use_count": 0,
+        "last_error": None,
+    }
+    result = _col("api_keys").insert_one(doc)
+    return str(result.inserted_id)
+
+
+def update_api_key(key_id: str, data: dict) -> None:
+    """Update an API key's label, key value, or enabled status."""
+    from bson import ObjectId
+    update_fields = {}
+    for field in ("label", "key", "enabled", "provider"):
+        if field in data:
+            update_fields[field] = data[field]
+    if update_fields:
+        _col("api_keys").update_one(
+            {"_id": ObjectId(key_id)},
+            {"$set": update_fields},
+        )
+
+
+def delete_api_key(key_id: str) -> None:
+    from bson import ObjectId
+    _col("api_keys").delete_one({"_id": ObjectId(key_id)})
+
+
+def toggle_api_key(key_id: str) -> bool:
+    """Toggle enabled status. Returns new enabled value."""
+    from bson import ObjectId
+    doc = _col("api_keys").find_one({"_id": ObjectId(key_id)})
+    if not doc:
+        return False
+    new_enabled = not doc.get("enabled", True)
+    _col("api_keys").update_one(
+        {"_id": ObjectId(key_id)},
+        {"$set": {"enabled": new_enabled}},
+    )
+    return new_enabled
+
+
+def get_api_key_by_value(key_value: str, provider: str) -> dict | None:
+    """Find an API key document by its key value and provider."""
+    return _col("api_keys").find_one({"key": key_value, "provider": provider})
+
+
+def record_api_key_usage(key_value: str, provider: str, error: str | None = None,
+                         tokens_used: int = 0) -> None:
+    """Increment use_count and stamp last_used for the key. Track daily token usage."""
+    now = _now()
+    today = now.strftime("%Y-%m-%d")
+    col = _col("api_keys")
+    filt = {"key": key_value, "provider": provider}
+
+    # Try atomic increment if date matches today
+    result = col.update_one(
+        {**filt, "daily_tokens_date": today},
+        {
+            "$inc": {"use_count": 1, "daily_tokens_used": tokens_used},
+            "$set": {"last_used": now, "last_error": error},
+        },
+    )
+
+    # Date changed (or field missing) — reset daily counter
+    if result.matched_count == 0:
+        col.update_one(
+            filt,
+            {
+                "$inc": {"use_count": 1},
+                "$set": {
+                    "last_used": now,
+                    "last_error": error,
+                    "daily_tokens_used": tokens_used,
+                    "daily_tokens_date": today,
+                },
+            },
+        )
+
+
+def migrate_api_keys_from_env() -> int:
+    """One-time migration: import API keys from environment variables if collection is empty."""
+    if _col("api_keys").count_documents({}) > 0:
+        return 0
+
+    now = _now()
+    docs = []
+    seen = set()
+
+    # Groq keys
+    for i in range(1, 11):
+        key = os.getenv(f"GROQ_API_KEY_{i}", "")
+        if key and key not in seen:
+            seen.add(key)
+            docs.append({
+                "provider": "groq",
+                "label": f"Groq Key {i}",
+                "key": key,
+                "enabled": True,
+                "added_date": now,
+                "last_used": None,
+                "use_count": 0,
+                "last_error": None,
+            })
+
+    # Gemini key
+    gemini_key = os.getenv("GEMINI_API_KEY", "")
+    if gemini_key and gemini_key not in seen:
+        docs.append({
+            "provider": "gemini",
+            "label": "Gemini Key 1",
+            "key": gemini_key,
+            "enabled": True,
+            "added_date": now,
+            "last_used": None,
+            "use_count": 0,
+            "last_error": None,
+        })
+
+    if not docs:
+        return 0
+
+    result = _col("api_keys").insert_many(docs)
+    n = len(result.inserted_ids)
+    logger.info(f"Migrated {n} API keys from environment into MongoDB.")
+    return n
+
+
 # ── One-time JSON → MongoDB migration ────────────────────────────────────────
 
 def migrate_from_json_if_empty(json_path: str = "all_accounts.json") -> int:

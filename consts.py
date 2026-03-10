@@ -17,26 +17,9 @@ class TelegramConfig(object):
     SESSIONS: list[str] = []
 
 
-class API_KEYS(object):
-    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
-
-    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY")
-    GROQ_API_KEY_1: str = os.getenv("GROQ_API_KEY_1")  # blackmorelouise01@gmail.com
-    GROQ_API_KEY_2: str = os.getenv("GROQ_API_KEY_2")  # farahat.hamza199@gmail.com
-    GROQ_API_KEY_3: str = os.getenv("GROQ_API_KEY_3")  # potato.motato247@gmail.com
-    GROQ_API_KEY_4: str = os.getenv("GROQ_API_KEY_4")  # yasemintekir81@gmail.com
-    GROQ_API_KEY_5: str = os.getenv("GROQ_API_KEY_5")  # tirs.bot1@gmail.com
-    GROQ_API_KEY_6: str = os.getenv("GROQ_API_KEY_6")  # tringgr4@gmail.com
-    GROQ_API_KEY_7: str = os.getenv("GROQ_API_KEY_7")  # dedeknana908@gmail.com
-    GROQ_API_KEY_8: str = os.getenv("GROQ_API_KEY_8")  # leokeguer@gmail.com
-    GROQ_API_KEY_9: str = os.getenv("GROQ_API_KEY_9")  # bopesmuer@gmail.com
-    GROQ_API_KEY_10: str = os.getenv("GROQ_API_KEY_10")  # nebavere@gmail.com
-
-    GROQ_API_LIST: list[str] = [
-        GROQ_API_KEY_1,
-        GROQ_API_KEY_2,
-        GROQ_API_KEY_3,
-    ]
+# API keys are now stored in MongoDB — managed via /api-keys/dashboard
+# On first startup, keys from .env (GROQ_API_KEY_1..10, GEMINI_API_KEY) are
+# auto-migrated into the api_keys collection by database.migrate_api_keys_from_env()
 
 
 class Models(object):
