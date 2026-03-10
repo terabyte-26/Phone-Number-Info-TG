@@ -157,8 +157,11 @@
         if (entry.provider === 'groq' && entry.limit_tokens) {
             const limit = entry.limit_tokens || 1;
             const remaining = entry.remaining_tokens || 0;
-            const usedPct = Math.round(((limit - remaining) / limit) * 100);
             const isLimited = entry.status === 'rate_limited';
+            const isTPD = limit >= 50000; // TPD = 100K, TPM = 12K
+
+            // For rate-limited keys (TPD data), show daily usage; otherwise show per-minute
+            const usedPct = Math.round(((limit - remaining) / limit) * 100);
             if (barFill) {
                 barFill.style.width = usedPct + '%';
                 barFill.className = 'usage-bar-fill ' + (usedPct > 90 ? 'danger' : 'groq');
@@ -167,11 +170,20 @@
                 const remainK = Math.round(remaining / 1000);
                 const limitK = Math.round(limit / 1000);
                 const cls = isLimited ? 'status-error' : 'status-ok';
+                const unit = isTPD ? 'TPD' : 'TPM';
                 const label = isLimited ? 'exhausted' : 'remaining';
-                statusEl.innerHTML = `<span class="${cls}">${remainK}K</span> / ${limitK}K tokens ${label}`;
+                let html = `<span class="${cls}">${remainK}K</span> / ${limitK}K ${unit} ${label}`;
                 if (entry.reset_tokens) {
-                    statusEl.innerHTML += ` <span class="status-reset">resets in ${entry.reset_tokens}</span>`;
+                    html += ` <span class="status-reset">resets in ${entry.reset_tokens}</span>`;
                 }
+                // Show daily usage alongside TPM when key is active
+                if (!isLimited && entry.daily_tokens_used != null) {
+                    const dailyUsedK = Math.round(entry.daily_tokens_used / 1000);
+                    const dailyLimitK = Math.round((entry.daily_tokens_limit || 100000) / 1000);
+                    const dailyPct = Math.round((entry.daily_tokens_used / (entry.daily_tokens_limit || 100000)) * 100);
+                    html += `<br><span class="status-daily">${dailyUsedK}K / ${dailyLimitK}K TPD used today (${dailyPct}%)</span>`;
+                }
+                statusEl.innerHTML = html;
             }
         } else if (entry.status === 'active') {
             if (barFill) barFill.style.width = '10%';

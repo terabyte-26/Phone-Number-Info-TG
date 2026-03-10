@@ -38,24 +38,33 @@ def _parse_groq_429(error_msg: str) -> dict:
 
 def check_groq_usage(api_key: str) -> dict:
     """
-    Check Groq daily token usage.
+    Check Groq token usage.
 
-    Groq response headers only expose per-minute token limits (TPM), NOT daily (TPD).
-    We combine two strategies:
-      1. Self-tracked daily usage from MongoDB (recorded on each real API call)
-      2. A probe API call to detect 429 (daily TPD exhaustion) for precise data
+    Strategy:
+      1. If this key hit a 429 today (TPD data stored in MongoDB), return that
+         — no need to waste tokens on a probe call.
+      2. Otherwise, make a minimal probe call and read per-minute headers (TPM).
+      3. If the probe itself 429s, parse and store the TPD data.
     """
     import datetime
-    DAILY_LIMIT = 100_000  # Groq free tier TPD for llama-3.3-70b-versatile
+    TPD_LIMIT = 100_000  # Groq free tier TPD for llama-3.3-70b-versatile
+    TPM_LIMIT = 12_000   # Groq free tier TPM for llama-3.3-70b-versatile
 
-    # First, get our self-tracked daily usage from MongoDB
+    # Check if we already have TPD data from a real 429 today
     today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
     key_doc = db.get_api_key_by_value(api_key, "groq")
-    tracked_tokens = 0
-    if key_doc and key_doc.get("daily_tokens_date") == today:
-        tracked_tokens = key_doc.get("daily_tokens_used", 0)
+    if key_doc and key_doc.get("tpd_status") == "rate_limited" and key_doc.get("daily_tokens_date") == today:
+        used = key_doc.get("daily_tokens_used", 0)
+        limit = key_doc.get("tpd_limit", TPD_LIMIT)
+        return {
+            "status": "rate_limited",
+            "limit_tokens": limit,
+            "remaining_tokens": max(0, limit - used),
+            "used_tokens": used,
+            "reset_tokens": key_doc.get("tpd_reset", ""),
+        }
 
-    # Make a minimal probe call to detect if the key is actually rate-limited
+    # No stored 429 — make a probe call and read per-minute headers
     try:
         client = Groq(api_key=api_key)
         raw_response = client.chat.completions.with_raw_response.create(
@@ -63,36 +72,40 @@ def check_groq_usage(api_key: str) -> dict:
             model=Models.Groq.LLAMA_3_3_70,
             max_tokens=2,
         )
-        # Probe succeeded — key is functional. Use tracked usage.
-        # Also read daily request headers for extra context
         headers = raw_response.headers
-        remaining_requests = int(headers.get("x-ratelimit-remaining-requests", 1000))
-        limit_requests = int(headers.get("x-ratelimit-limit-requests", 1000))
+        limit = int(headers.get("x-ratelimit-limit-tokens", TPM_LIMIT))
+        remaining = int(headers.get("x-ratelimit-remaining-tokens", limit))
+        reset = headers.get("x-ratelimit-reset-tokens", "")
+        used = limit - remaining
 
-        # Parse probe response tokens to keep tracking accurate
-        response = raw_response.parse()
-        probe_tokens = getattr(response.usage, "total_tokens", 0) if response.usage else 0
-        if probe_tokens and key_doc:
-            db.record_api_key_usage(api_key, "groq", tokens_used=probe_tokens)
-            tracked_tokens += probe_tokens
+        # Also show tracked daily usage if available
+        tracked = key_doc.get("daily_tokens_used", 0) if key_doc and key_doc.get("daily_tokens_date") == today else 0
 
-        remaining = max(0, DAILY_LIMIT - tracked_tokens)
         return {
-            "status": "rate_limited" if remaining == 0 else "active",
-            "limit_tokens": DAILY_LIMIT,
+            "status": "active",
+            "limit_tokens": limit,
             "remaining_tokens": remaining,
-            "used_tokens": tracked_tokens,
-            "daily_requests_remaining": remaining_requests,
-            "daily_requests_limit": limit_requests,
+            "used_tokens": used,
+            "reset_tokens": reset,
+            "daily_tokens_used": tracked,
+            "daily_tokens_limit": TPD_LIMIT,
         }
     except Exception as e:
         error_msg = str(e)
         if "429" in error_msg or "rate_limit" in error_msg.lower():
             result = _parse_groq_429(error_msg)
+            # Store TPD data so dashboard shows it without another probe
+            if "used_tokens" in result:
+                db.update_api_key_tpd(
+                    api_key, "groq",
+                    used=result["used_tokens"],
+                    limit=result.get("limit_tokens", TPD_LIMIT),
+                    reset=result.get("reset_tokens"),
+                )
             if "limit_tokens" not in result:
-                result["limit_tokens"] = DAILY_LIMIT
+                result["limit_tokens"] = TPD_LIMIT
                 result["remaining_tokens"] = 0
-                result["used_tokens"] = DAILY_LIMIT
+                result["used_tokens"] = TPD_LIMIT
             return result
         if "401" in error_msg or "invalid" in error_msg.lower():
             return {"status": "invalid", "error": "Invalid API key"}
@@ -179,7 +192,18 @@ def get_groq_proposal(message: str) -> str:
         db.record_api_key_usage(api_key, "groq", tokens_used=tokens)
         return chat_completion.choices[0].message.content
     except Exception as e:
-        db.record_api_key_usage(api_key, "groq", error=str(e))
+        error_msg = str(e)
+        # Parse and store TPD data from 429 errors for the dashboard
+        if "429" in error_msg or "rate_limit" in error_msg.lower():
+            tpd = _parse_groq_429(error_msg)
+            if "used_tokens" in tpd:
+                db.update_api_key_tpd(
+                    api_key, "groq",
+                    used=tpd["used_tokens"],
+                    limit=tpd.get("limit_tokens", 100_000),
+                    reset=tpd.get("reset_tokens"),
+                )
+        db.record_api_key_usage(api_key, "groq", error=error_msg)
         raise
 
 

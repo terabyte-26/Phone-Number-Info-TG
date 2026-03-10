@@ -287,6 +287,22 @@ def get_api_key_by_value(key_value: str, provider: str) -> dict | None:
     return _col("api_keys").find_one({"key": key_value, "provider": provider})
 
 
+def update_api_key_tpd(key_value: str, provider: str, used: int, limit: int,
+                       reset: str | None = None) -> None:
+    """Store daily TPD (tokens per day) data parsed from a Groq 429 error."""
+    _col("api_keys").update_one(
+        {"key": key_value, "provider": provider},
+        {"$set": {
+            "daily_tokens_used": used,
+            "daily_tokens_date": _now().strftime("%Y-%m-%d"),
+            "tpd_limit": limit,
+            "tpd_reset": reset,
+            "tpd_status": "rate_limited",
+            "tpd_updated_at": _now(),
+        }},
+    )
+
+
 def record_api_key_usage(key_value: str, provider: str, error: str | None = None,
                          tokens_used: int = 0) -> None:
     """Increment use_count and stamp last_used for the key. Track daily token usage."""
