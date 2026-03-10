@@ -303,6 +303,14 @@ def update_api_key_tpd(key_value: str, provider: str, used: int, limit: int,
     )
 
 
+def clear_api_key_tpd(key_value: str, provider: str) -> None:
+    """Clear the rate_limited TPD status when a key becomes available again."""
+    _col("api_keys").update_one(
+        {"key": key_value, "provider": provider},
+        {"$set": {"tpd_status": None, "tpd_reset": None}},
+    )
+
+
 def record_api_key_usage(key_value: str, provider: str, error: str | None = None,
                          tokens_used: int = 0) -> None:
     """Increment use_count and stamp last_used for the key. Track daily token usage."""

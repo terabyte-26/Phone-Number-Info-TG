@@ -36,35 +36,76 @@ def _parse_groq_429(error_msg: str) -> dict:
     return result
 
 
+def _parse_tpd_reset_seconds(reset_str: str) -> float:
+    """Parse Groq reset string like '3m33.408s' into seconds."""
+    import re
+    total = 0.0
+    m = re.search(r'(\d+)m', reset_str)
+    if m:
+        total += int(m.group(1)) * 60
+    s = re.search(r'([\d.]+)s', reset_str)
+    if s:
+        total += float(s.group(1))
+    return total
+
+
 def check_groq_usage(api_key: str) -> dict:
     """
     Check Groq token usage.
 
     Strategy:
-      1. If this key hit a 429 today (TPD data stored in MongoDB), return that
-         — no need to waste tokens on a probe call.
-      2. Otherwise, make a minimal probe call and read per-minute headers (TPM).
-      3. If the probe itself 429s, parse and store the TPD data.
+      1. If this key hit a 429 today and the reset time hasn't passed yet,
+         return stored TPD data (no probe call needed).
+      2. If the reset time has passed, do a probe call to verify the key
+         is available again — if it succeeds, clear the rate-limited status.
+      3. For keys without stored 429 data, probe and read per-minute headers.
     """
     import datetime
     TPD_LIMIT = 100_000  # Groq free tier TPD for llama-3.3-70b-versatile
     TPM_LIMIT = 12_000   # Groq free tier TPM for llama-3.3-70b-versatile
 
-    # Check if we already have TPD data from a real 429 today
-    today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+    now = datetime.datetime.utcnow()
+    today = now.strftime("%Y-%m-%d")
     key_doc = db.get_api_key_by_value(api_key, "groq")
-    if key_doc and key_doc.get("tpd_status") == "rate_limited" and key_doc.get("daily_tokens_date") == today:
-        used = key_doc.get("daily_tokens_used", 0)
-        limit = key_doc.get("tpd_limit", TPD_LIMIT)
-        return {
-            "status": "rate_limited",
-            "limit_tokens": limit,
-            "remaining_tokens": max(0, limit - used),
-            "used_tokens": used,
-            "reset_tokens": key_doc.get("tpd_reset", ""),
-        }
 
-    # No stored 429 — make a probe call and read per-minute headers
+    # Check if key was marked rate-limited today
+    if key_doc and key_doc.get("tpd_status") == "rate_limited" and key_doc.get("daily_tokens_date") == today:
+        # Check if the reset time has passed
+        updated_at = key_doc.get("tpd_updated_at")
+        reset_str = key_doc.get("tpd_reset", "")
+        reset_secs = _parse_tpd_reset_seconds(reset_str) if reset_str else 0
+
+        if updated_at and reset_secs > 0:
+            elapsed = (now - updated_at).total_seconds()
+            if elapsed >= reset_secs:
+                # Reset time has passed — probe to check if key is recharged
+                logger.info(f"Groq key {api_key[:8]}... reset time elapsed, probing...")
+            else:
+                # Still within reset window — return stored data
+                used = key_doc.get("daily_tokens_used", 0)
+                limit = key_doc.get("tpd_limit", TPD_LIMIT)
+                remaining_secs = int(reset_secs - elapsed)
+                mins, secs = divmod(remaining_secs, 60)
+                return {
+                    "status": "rate_limited",
+                    "limit_tokens": limit,
+                    "remaining_tokens": max(0, limit - used),
+                    "used_tokens": used,
+                    "reset_tokens": f"{mins}m{secs}s" if mins else f"{secs}s",
+                }
+        elif not reset_secs:
+            # No reset time info — still return stored data
+            used = key_doc.get("daily_tokens_used", 0)
+            limit = key_doc.get("tpd_limit", TPD_LIMIT)
+            return {
+                "status": "rate_limited",
+                "limit_tokens": limit,
+                "remaining_tokens": max(0, limit - used),
+                "used_tokens": used,
+                "reset_tokens": "",
+            }
+
+    # Probe call — either key is not rate-limited, or reset time has passed
     try:
         client = Groq(api_key=api_key)
         raw_response = client.chat.completions.with_raw_response.create(
@@ -78,7 +119,11 @@ def check_groq_usage(api_key: str) -> dict:
         reset = headers.get("x-ratelimit-reset-tokens", "")
         used = limit - remaining
 
-        # Also show tracked daily usage if available
+        # Key is working again — clear rate-limited status
+        if key_doc and key_doc.get("tpd_status") == "rate_limited":
+            db.clear_api_key_tpd(api_key, "groq")
+            logger.info(f"Groq key {api_key[:8]}... is available again, cleared rate-limit status")
+
         tracked = key_doc.get("daily_tokens_used", 0) if key_doc and key_doc.get("daily_tokens_date") == today else 0
 
         return {
@@ -94,7 +139,6 @@ def check_groq_usage(api_key: str) -> dict:
         error_msg = str(e)
         if "429" in error_msg or "rate_limit" in error_msg.lower():
             result = _parse_groq_429(error_msg)
-            # Store TPD data so dashboard shows it without another probe
             if "used_tokens" in result:
                 db.update_api_key_tpd(
                     api_key, "groq",
@@ -176,11 +220,25 @@ def get_groq_proposal(message: str) -> str:
     if not keys:
         raise RuntimeError("No enabled Groq API keys available.")
 
-    # Filter out keys known to be exhausted today (stored TPD 429 data)
-    today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
-    available = [k for k in keys
-                 if k.get("tpd_status") != "rate_limited"
-                 or k.get("daily_tokens_date") != today]
+    # Filter out keys known to be exhausted today, unless reset time has passed
+    now = datetime.datetime.utcnow()
+    today = now.strftime("%Y-%m-%d")
+
+    available = []
+    recharged = []
+    for k in keys:
+        if k.get("tpd_status") != "rate_limited" or k.get("daily_tokens_date") != today:
+            available.append(k)
+        else:
+            # Check if reset time has passed — key may be recharged
+            updated_at = k.get("tpd_updated_at")
+            reset_str = k.get("tpd_reset", "")
+            reset_secs = _parse_tpd_reset_seconds(reset_str) if reset_str else 0
+            if updated_at and reset_secs > 0 and (now - updated_at).total_seconds() >= reset_secs:
+                recharged.append(k)
+
+    # Add recharged keys back (try them after known-good keys)
+    available.extend(recharged)
 
     # If all keys are exhausted, fall back to full list (let it 429 naturally)
     if not available:
@@ -204,6 +262,10 @@ def get_groq_proposal(message: str) -> str:
             )
             tokens = getattr(chat_completion.usage, "total_tokens", 0) if chat_completion.usage else 0
             db.record_api_key_usage(api_key, "groq", tokens_used=tokens)
+            # Clear rate-limited status if this key was previously exhausted
+            if key_doc.get("tpd_status") == "rate_limited":
+                db.clear_api_key_tpd(api_key, "groq")
+                logger.info(f"Groq key {api_key[:8]}... recharged, cleared rate-limit status")
             return chat_completion.choices[0].message.content
         except Exception as e:
             error_msg = str(e)
