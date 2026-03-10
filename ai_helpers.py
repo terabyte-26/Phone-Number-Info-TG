@@ -169,42 +169,65 @@ def get_gemini_response(message: str) -> str:
 # ── Groq (fallback) ──────────────────────────────────────────────────────────
 
 def get_groq_proposal(message: str) -> str:
-    """Call Groq LLM using a key from the DB."""
+    """Call Groq LLM using a key from the DB. Rotates through keys on 429."""
+    import datetime
+
     keys = db.get_enabled_api_keys("groq")
     if not keys:
         raise RuntimeError("No enabled Groq API keys available.")
 
-    key_doc = random.choice(keys)
-    api_key = key_doc["key"]
+    # Filter out keys known to be exhausted today (stored TPD 429 data)
+    today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+    available = [k for k in keys
+                 if k.get("tpd_status") != "rate_limited"
+                 or k.get("daily_tokens_date") != today]
 
-    try:
-        client = Groq(api_key=api_key)
-        chat_completion = client.chat.completions.create(
-            messages=[
-                {
-                    "role": "user",
-                    "content": Prompts.PROMPT_EXTRACTOR + message
-                }
-            ],
-            model=Models.Groq.LLAMA_3_3_70,
-        )
-        tokens = getattr(chat_completion.usage, "total_tokens", 0) if chat_completion.usage else 0
-        db.record_api_key_usage(api_key, "groq", tokens_used=tokens)
-        return chat_completion.choices[0].message.content
-    except Exception as e:
-        error_msg = str(e)
-        # Parse and store TPD data from 429 errors for the dashboard
-        if "429" in error_msg or "rate_limit" in error_msg.lower():
-            tpd = _parse_groq_429(error_msg)
-            if "used_tokens" in tpd:
-                db.update_api_key_tpd(
-                    api_key, "groq",
-                    used=tpd["used_tokens"],
-                    limit=tpd.get("limit_tokens", 100_000),
-                    reset=tpd.get("reset_tokens"),
-                )
-        db.record_api_key_usage(api_key, "groq", error=error_msg)
-        raise
+    # If all keys are exhausted, fall back to full list (let it 429 naturally)
+    if not available:
+        available = keys
+
+    random.shuffle(available)
+    last_error = None
+
+    for key_doc in available:
+        api_key = key_doc["key"]
+        try:
+            client = Groq(api_key=api_key)
+            chat_completion = client.chat.completions.create(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": Prompts.PROMPT_EXTRACTOR + message
+                    }
+                ],
+                model=Models.Groq.LLAMA_3_3_70,
+            )
+            tokens = getattr(chat_completion.usage, "total_tokens", 0) if chat_completion.usage else 0
+            db.record_api_key_usage(api_key, "groq", tokens_used=tokens)
+            return chat_completion.choices[0].message.content
+        except Exception as e:
+            error_msg = str(e)
+            if "429" in error_msg or "rate_limit" in error_msg.lower():
+                # Store TPD data and try next key
+                tpd = _parse_groq_429(error_msg)
+                if "used_tokens" in tpd:
+                    db.update_api_key_tpd(
+                        api_key, "groq",
+                        used=tpd["used_tokens"],
+                        limit=tpd.get("limit_tokens", 100_000),
+                        reset=tpd.get("reset_tokens"),
+                    )
+                db.record_api_key_usage(api_key, "groq", error=error_msg)
+                logger.warning(f"Groq key {api_key[:8]}... rate-limited, trying next key")
+                last_error = e
+                continue
+            # Non-429 error — don't retry
+            db.record_api_key_usage(api_key, "groq", error=error_msg)
+            raise
+
+    # All keys exhausted
+    logger.warning("All Groq API keys are rate-limited")
+    raise last_error
 
 
 # ── Unified caller: Gemini first, Groq fallback ─────────────────────────────
