@@ -155,33 +155,43 @@
         const statusEl = cell.querySelector('.usage-status');
 
         if (entry.provider === 'groq' && entry.limit_tokens) {
-            const limit = entry.limit_tokens || 1;
-            const remaining = entry.remaining_tokens || 0;
             const isLimited = entry.status === 'rate_limited';
-            const isTPD = limit >= 50000; // TPD = 100K, TPM = 12K
+            const isTPD = entry.limit_tokens >= 50000; // TPD = 100K, TPM = 12K
 
-            // For rate-limited keys (TPD data), show daily usage; otherwise show per-minute
-            const usedPct = Math.round(((limit - remaining) / limit) * 100);
+            // Determine what to show on the bar: daily TPD if available, else TPM
+            const dailyUsed = entry.daily_tokens_used || 0;
+            const dailyLimit = entry.daily_tokens_limit || 100000;
+            const hasDailyData = !isLimited && entry.daily_tokens_used != null;
+
+            // Bar always shows daily TPD usage (the metric that matters)
+            const barUsed = isTPD ? (entry.limit_tokens - (entry.remaining_tokens || 0)) : dailyUsed;
+            const barLimit = isTPD ? entry.limit_tokens : dailyLimit;
+            const usedPct = Math.round((barUsed / barLimit) * 100);
+
             if (barFill) {
                 barFill.style.width = usedPct + '%';
-                barFill.className = 'usage-bar-fill ' + (usedPct > 90 ? 'danger' : 'groq');
+                barFill.className = 'usage-bar-fill ' + (usedPct > 90 ? 'danger' : usedPct > 70 ? 'warning' : 'groq');
             }
             if (statusEl) {
-                const remainK = Math.round(remaining / 1000);
-                const limitK = Math.round(limit / 1000);
-                const cls = isLimited ? 'status-error' : 'status-ok';
-                const unit = isTPD ? 'TPD' : 'TPM';
-                const label = isLimited ? 'exhausted' : 'remaining';
-                let html = `<span class="${cls}">${remainK}K</span> / ${limitK}K ${unit} ${label}`;
-                if (entry.reset_tokens) {
-                    html += ` <span class="status-reset">resets in ${entry.reset_tokens}</span>`;
-                }
-                // Show daily usage alongside TPM when key is active
-                if (!isLimited && entry.daily_tokens_used != null) {
-                    const dailyUsedK = Math.round(entry.daily_tokens_used / 1000);
-                    const dailyLimitK = Math.round((entry.daily_tokens_limit || 100000) / 1000);
-                    const dailyPct = Math.round((entry.daily_tokens_used / (entry.daily_tokens_limit || 100000)) * 100);
-                    html += `<br><span class="status-daily">${dailyUsedK}K / ${dailyLimitK}K TPD used today (${dailyPct}%)</span>`;
+                let html = '';
+                if (isLimited) {
+                    // Key hit daily 429 — show TPD data
+                    const remainK = Math.round((entry.remaining_tokens || 0) / 1000);
+                    const limitK = Math.round(entry.limit_tokens / 1000);
+                    html = `<span class="status-error">${remainK}K</span> / ${limitK}K TPD exhausted`;
+                    if (entry.reset_tokens) {
+                        html += ` <span class="status-reset">resets in ${entry.reset_tokens}</span>`;
+                    }
+                } else if (hasDailyData) {
+                    // Active key with tracked daily usage
+                    const dailyUsedK = Math.round(dailyUsed / 1000);
+                    const dailyLimitK = Math.round(dailyLimit / 1000);
+                    html = `<span class="status-ok">${dailyUsedK}K</span> / ${dailyLimitK}K TPD used today (${usedPct}%)`;
+                } else {
+                    // No daily data yet — show TPM from headers
+                    const remainK = Math.round((entry.remaining_tokens || 0) / 1000);
+                    const limitK = Math.round(entry.limit_tokens / 1000);
+                    html = `<span class="status-ok">${remainK}K</span> / ${limitK}K TPM remaining`;
                 }
                 statusEl.innerHTML = html;
             }

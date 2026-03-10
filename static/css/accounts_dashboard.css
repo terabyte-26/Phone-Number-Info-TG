@@ -1595,6 +1595,7 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 
 .usage-bar-fill.gemini { background: var(--green); }
 .usage-bar-fill.groq { background: var(--amber); }
+.usage-bar-fill.warning { background: #e67e22; }
 .usage-bar-fill.danger { background: var(--danger); }
 
 .usage-status {
