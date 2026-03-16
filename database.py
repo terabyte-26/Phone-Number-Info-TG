@@ -78,6 +78,8 @@ def insert_account(account: dict) -> str:
     data = {k: v for k, v in account.items() if k not in ("_id", "added_date")}
     data["_id"]        = phone
     data["added_date"] = _now()
+    data.setdefault("under_use", False)
+    data.setdefault("last_used", None)
 
     _col("accounts").insert_one(data)
     return phone
@@ -391,21 +393,6 @@ def migrate_api_keys_from_env() -> int:
     logger.info(f"Migrated {n} API keys from environment into MongoDB.")
     return n
 
-
-def backfill_missing_added_date() -> int:
-    """
-    Backfill added_date for accounts that have paid_subscription but are
-    missing added_date (e.g. manually inserted into MongoDB).
-    Returns the number of documents updated.
-    """
-    result = _col("accounts").update_many(
-        {
-            "paid_subscription": {"$exists": True, "$ne": None, "$ne": {}},
-            "added_date": {"$exists": False},
-        },
-        {"$set": {"added_date": _now()}},
-    )
-    return result.modified_count
 
 
 # ── One-time JSON → MongoDB migration ────────────────────────────────────────

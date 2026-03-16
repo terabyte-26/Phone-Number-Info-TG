@@ -88,14 +88,6 @@ def startup_check():
     except Exception as exc:
         logger.error(f"Failed to load sessions from MongoDB: {exc}")
 
-    # Backfill added_date for accounts with paid_subscription but missing it
-    try:
-        backfilled = db.backfill_missing_added_date()
-        if backfilled:
-            logger.info(f"Backfilled added_date for {backfilled} account(s) with paid subscriptions.")
-    except Exception as exc:
-        logger.warning(f"Could not backfill added_date: {exc}")
-
     # Release any accounts stuck as under_use from a previous crash
     try:
         released = db.release_stale_accounts()
