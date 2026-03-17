@@ -125,14 +125,16 @@ def update_session_string(phone: str, session_string: str) -> None:
 _STALE_TIMEOUT_SECONDS = 120  # 2 minutes — auto-release stuck accounts
 
 
-def acquire_account(bot_source: str | None = None, skip_phones: list[str] | None = None) -> dict | None:
+def acquire_account(bot_source: str | None = None, skip_phones: list[str] | None = None,
+                    mode: str = "live") -> dict | None:
     """
-    Atomically find an available live account with a session string,
+    Atomically find an available account with a session string,
     mark it as under_use=True and stamp last_used=now.
 
     bot_source: e.g. "sml", "wcb", "aml" — only accounts with an active
                 paid_subscription for this bot will be considered.
     skip_phones: list of phone numbers to exclude (e.g. rate-limited accounts).
+    mode: "live" (default) or "backup" — which pool to acquire from.
 
     Accounts stuck as under_use for longer than _STALE_TIMEOUT_SECONDS
     are considered available (crash recovery).
@@ -143,7 +145,7 @@ def acquire_account(bot_source: str | None = None, skip_phones: list[str] | None
     stale_cutoff = now - timedelta(seconds=_STALE_TIMEOUT_SECONDS)
 
     query = {
-        "mode": "live",
+        "mode": mode,
         "session_string": {"$exists": True, "$ne": None, "$gt": ""},
         "$or": [
             {"under_use": {"$ne": True}},

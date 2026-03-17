@@ -721,6 +721,7 @@ async def search_phone():
     # 1. Validate inputs
     message_text = request.args.get("input", "")
     source = request.args.get("source", "")
+    use_backup = request.args.get("bkp", "0") == "1"
 
     if not message_text:
         return jsonify({"error": "Phone number is required"}), 400
@@ -732,7 +733,8 @@ async def search_phone():
         return jsonify({"error": "Invalid bot source provided."}), 400
 
     # 2. Acquire an available account that has a subscription for this bot
-    account = db.acquire_account(bot_source=source.lower())
+    account_mode = "backup" if use_backup else "live"
+    account = db.acquire_account(bot_source=source.lower(), mode=account_mode)
     if not account:
         logger.info(f"No available account with {source.upper()} subscription for '{message_text}'.")
         return jsonify({
